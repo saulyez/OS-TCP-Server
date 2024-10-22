@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -8,9 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-
+#define BUFFERSIZE 256
 struct node {
-    char rule[256];
+    char rule[BUFFERSIZE];
     struct node *next;
 };
 
@@ -21,6 +22,40 @@ void print_rules(struct node *p) {
         p = p->next;
     }
 }
+
+bool only_digit(const char *str) {
+    while (*str) {
+        if (!isdigit(*str)) {
+            return false;
+        }
+        str++;
+    }
+    return true;
+}
+
+bool valid_rule(char *rule) {
+    char temp[BUFFERSIZE];
+    strncpy(temp, rule ,BUFFERSIZE);
+    char *split = strtok(temp, ".");
+    int parts = 0;
+
+    while (split != NULL) {
+        if (!only_digit(split)) {
+            return false;
+        }
+        int num = atoi(split);
+        if (num < 0 || num > 255) {
+            return false;
+        }
+        parts++;
+        split = strtok(NULL, ".");
+    }
+    if (parts != 4) {
+        return false;
+    }
+    return true;
+}
+
 
 // Function to add a new rule to the end of the linked list
 void add_rule(struct node **head, char *new_rule) {
@@ -50,7 +85,7 @@ void add_rule(struct node **head, char *new_rule) {
 bool isOnline = false;
 
 int main (int argc, char **argv) {
-    char command[256];
+    char command[BUFFERSIZE];
 
     struct node *head = NULL;  // Initialize the list of rules as empty
     if(argc == 2 && strcmp(argv[1],"-i") == 0) {
@@ -74,15 +109,19 @@ int main (int argc, char **argv) {
             print_rules(head);
         } else if (command[0] == 'A' && command[1] == ' ') {
             // Handle the "A <rule>" command
-            char new_rule[256];
+            char new_rule[BUFFERSIZE];
             // Copy the rest of the command as the new rule (skip the first two characters "A ")
             strncpy(new_rule, command + 2, sizeof(new_rule) - 1);
             new_rule[sizeof(new_rule) - 1] = '\0'; // Ensure null-termination
 
-            // Add the new rule to the list
-            add_rule(&head, new_rule);
-            printf("Rule added: %s\n", new_rule);
-        } else if (strcmp(command, "exit") == 0) {
+            if(valid_rule(new_rule)) {
+                add_rule(&head, new_rule);
+                printf("Rule added\n");
+            }
+            else {
+                printf("Invalid Rule\n");
+            }
+        } else if (strcmp(command, "e") == 0) {
             isOnline = false;
         } else {
             printf("Command not recognised: %s\n", command);
