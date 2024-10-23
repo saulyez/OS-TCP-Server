@@ -12,17 +12,17 @@
 #define BUFFERSIZE 256
 struct node {
     char rule[BUFFERSIZE];
+    char port[BUFFERSIZE];
     struct node *next;
 };
 
 // Function to print all the rules in the linked list
 void print_rules(struct node *p) {
     while (p != NULL) {
-        printf("%s\n", p->rule);
+        printf("%s %s\n", p->rule, p->port);
         p = p->next;
     }
 }
-
 bool only_digit(const char *str) {
     while (*str) {
         if (!isdigit(*str)) {
@@ -32,7 +32,17 @@ bool only_digit(const char *str) {
     }
     return true;
 }
-
+bool valid_port(char *port) {
+    //to finish
+    if (!only_digit(port)) {
+        return false;
+    }
+    int val = atoi(port);
+    if (val < 1 || val > 65535) {
+        return false;
+    }
+    return true;
+}
 bool valid_rule(char *rule) {
     char temp[BUFFERSIZE];
     strncpy(temp, rule ,BUFFERSIZE);
@@ -58,7 +68,7 @@ bool valid_rule(char *rule) {
 
 
 // Function to add a new rule to the end of the linked list
-void add_rule(struct node **head, char *new_rule) {
+void add_rule(struct node **head, char *new_rule, char *new_port) {
     struct node *new_node = (struct node*)malloc(sizeof(struct node));
     if (new_node == NULL) {
         perror("malloc");
@@ -67,6 +77,7 @@ void add_rule(struct node **head, char *new_rule) {
 
     // Copy the new rule into the node
     strcpy(new_node->rule, new_rule);
+    strcpy(new_node->port, new_port);
     new_node->next = NULL;
 
     // If the list is empty, make the new node the head
@@ -110,12 +121,18 @@ int main (int argc, char **argv) {
         } else if (command[0] == 'A' && command[1] == ' ') {
             // Handle the "A <rule>" command
             char new_rule[BUFFERSIZE];
-            // Copy the rest of the command as the new rule (skip the first two characters "A ")
-            strncpy(new_rule, command + 2, sizeof(new_rule) - 1);
-            new_rule[sizeof(new_rule) - 1] = '\0'; // Ensure null-termination
+            char new_port[BUFFERSIZE];
+            int args = sscanf(command + 2, "%s %s", new_rule, new_port);
 
-            if(valid_rule(new_rule)) {
-                add_rule(&head, new_rule);
+            // strncpy(new_rule, command + 2, sizeof(new_rule) - 1);
+            // new_rule[sizeof(new_rule) - 1] = '\0'; // Ensure null-termination
+            //
+            // if(valid_rule(new_rule)) {
+            //     add_rule(&head, new_rule);
+            //     printf("Rule added\n");
+            // }
+            if(args == 2 && valid_rule(new_rule) && valid_port(new_port)) {
+                add_rule(&head, new_rule, new_port);
                 printf("Rule added\n");
             }
             else {
