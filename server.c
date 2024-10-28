@@ -13,6 +13,7 @@
 struct node {
     char rule[BUFFERSIZE];
     char port[BUFFERSIZE];
+    // struct node *matchedconnections;
     struct node *next;
 };
 
@@ -43,7 +44,8 @@ bool valid_port(char *port) {
     }
     return true;
 }
-bool valid_rule(char *rule) {
+
+bool valid_ip(char *rule) {
     char temp[BUFFERSIZE];
     strncpy(temp, rule ,BUFFERSIZE);
     char *split = strtok(temp, ".");
@@ -65,7 +67,54 @@ bool valid_rule(char *rule) {
     }
     return true;
 }
+bool valid_ip_range (char *ip_range) {
+    // xxx.xxx.xxx.xxx-xxx.xxx.xxx.xxx
+    // xxx.xxx.xxx.xxx and xxx.xxx.xxx.xxx
+    // run valid_ip on both
+    // if both are valid, compare the values;
+    // tokenize both into octets
+    char temp[BUFFERSIZE];
+    strncpy(temp, ip_range, BUFFERSIZE);
+    char *left = strtok(temp, "-");
+    char *right = strtok(NULL, "-");
 
+    if(left == NULL || right == NULL || !valid_ip(left) || !valid_ip(right)) {
+        return false;
+    }
+    char temp_left[BUFFERSIZE], temp_right[BUFFERSIZE];
+    strncpy(temp_left, left, BUFFERSIZE);
+    strncpy(temp_right, right, BUFFERSIZE);
+
+
+    int left_ip[4], right_ip[4];
+    char *split = strtok(temp_left, ".");
+
+    for (int i = 0; i < 4 && split != NULL; i++) {
+        left_ip[i] = atoi(split);
+        split = strtok(NULL, ".");
+    }
+    if(split != NULL) {
+        return false;
+    }
+
+    split = strtok(temp_right, ".");
+    for (int i = 0; i < 4 && split != NULL; i++) {
+        right_ip[i] = atoi(split);
+        split = strtok(NULL, ".");
+    }
+    if (split != NULL) {
+        return false;
+    }
+
+    for (int i = 0; i < 4; i++) {
+        if (left_ip[i] < right_ip[i]){
+            return true;
+        } else if (left_ip[i] > right_ip[i]) {
+            return false;
+        }
+    }
+    return false;
+}
 
 // Function to add a new rule to the end of the linked list
 void add_rule(struct node **head, char *new_rule, char *new_port) {
@@ -98,18 +147,17 @@ bool isOnline = false;
 int main (int argc, char **argv) {
     char command[BUFFERSIZE];
 
-    struct node *head = NULL;  // Initialize the list of rules as empty
+    struct node *head = NULL;
     if(argc == 2 && strcmp(argv[1],"-i") == 0) {
         isOnline = true;
         printf("Server Running\n");
     }
     // Main server loop
     while (isOnline) {
-        // Use fgets to capture the entire input including spaces
         printf("Enter a command: ");
         fgets(command, sizeof(command), stdin);
 
-        // Remove the newline character at the end of the input if it exists
+        // Remove the newline character
         size_t len = strlen(command);
         if (len > 0 && command[len - 1] == '\n') {
             command[len - 1] = '\0';
@@ -119,21 +167,28 @@ int main (int argc, char **argv) {
             // Print all the rules if "R" is entered
             print_rules(head);
         } else if (command[0] == 'A' && command[1] == ' ') {
-            // Handle the "A <rule>" command
-            char new_rule[BUFFERSIZE];
+            // Handle the "A IP Port" command
+            char new_ip[BUFFERSIZE];
             char new_port[BUFFERSIZE];
-            int args = sscanf(command + 2, "%s %s", new_rule, new_port);
+            int args = sscanf(command + 2, "%s %s", new_ip, new_port);
 
-            // strncpy(new_rule, command + 2, sizeof(new_rule) - 1);
-            // new_rule[sizeof(new_rule) - 1] = '\0'; // Ensure null-termination
-            //
-            // if(valid_rule(new_rule)) {
-            //     add_rule(&head, new_rule);
+            // if(args == 2 && valid_ip(new_rule) && valid_port(new_port)) {
+            //     add_rule(&head, new_rule, new_port);
             //     printf("Rule added\n");
             // }
-            if(args == 2 && valid_rule(new_rule) && valid_port(new_port)) {
-                add_rule(&head, new_rule, new_port);
-                printf("Rule added\n");
+            if (args == 2 && strchr(new_ip,'-')) {
+                if (valid_ip_range(new_ip) && valid_port(new_port)) {
+                    add_rule(&head, new_ip, new_port);
+                    printf("Rule added\n");
+                } else {
+                    printf("Invalid Rule\n");
+                }
+            }
+            else if (args == 2 && !strchr(new_ip, '-')) {
+                if (valid_ip(new_ip) && valid_port(new_port)) {
+                    add_rule(&head, new_ip, new_port);
+                    printf("Rule added\n");
+                }
             }
             else {
                 printf("Invalid Rule\n");
