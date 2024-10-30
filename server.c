@@ -9,6 +9,7 @@
 #include <string.h>
 
 #define BUFFERSIZE 256
+bool isOnline = false;
 struct node {
     char ip[BUFFERSIZE];
     char port[BUFFERSIZE];
@@ -16,12 +17,45 @@ struct node {
     struct node *next;
 };
 
-void get_input (char *input);
+void get_input (char *buffer, int size) {
+    if (fgets(buffer, size, stdin) != NULL) {
+        size_t len = strlen(buffer);
+        if (len > 0 && buffer[len - 1] == '\n') {
+            buffer[len - 1] = '\0';
+        }
+    } else {
+        buffer[0] = '\0';
+    }
+}
+
 // void print_requests(struct node *head) {
 //  //TODO
 //
 // }
 
+void add_request(struct node **head, char *new_ip) {
+    struct node *new_node = (struct node*)malloc(sizeof(struct node));
+    if (new_node == NULL) {
+        perror("malloc");
+        return;
+    }
+    // Copy the new rule into the node
+    strcpy(new_node->ip, new_ip);
+    new_node->next = NULL;
+
+
+    // If the list is empty, make the new node the head
+    if (*head == NULL) {
+        *head = new_node;
+    } else {
+        // Otherwise, find the last node and append the new node
+        struct node *temp = *head;
+        while (temp->next != NULL) {
+            temp = temp->next;
+        }
+        temp->next = new_node;
+    }
+}
 
 
 // Function to print all the rules in the linked list
@@ -166,14 +200,14 @@ void check_in_rule(char *ip_port) {
     //TODO
 
 }
-void delete_matched_connections(struct node *connections_head) {
-    struct node *temp;
-    while (connections_head != NULL) {
-        temp = connections_head;
-        connections_head = connections_head->next;
-        free(temp);
-    }
-}
+// void delete_matched_connections(struct node *connections_head) {
+//     struct node *temp;
+//     while (connections_head != NULL) {
+//         temp = connections_head;
+//         connections_head = connections_head->next;
+//         free(temp);
+//     }
+// }
 // void delete_rules(struct node **head, const char *ip,const char *port) {
 //     //TODO
 //     struct node *temp = *head;
@@ -210,11 +244,11 @@ void add_rule(struct node **head, char *new_ip, char *new_port) {
     }
 }
 
-bool isOnline = false;
 
 int main (int argc, char **argv) {
     char command[BUFFERSIZE];
     struct node *rules = NULL;
+    struct node *requests = NULL;
     // struct node *requests = NULL;
     if(argc == 2 && strcmp(argv[1],"-i") == 0) {
         isOnline = true;
@@ -223,17 +257,13 @@ int main (int argc, char **argv) {
     // Main server loop
     while (isOnline) {
         printf("Enter a command: ");
-        fgets(command, sizeof(command), stdin);
 
-        // Remove the newline character
-        size_t len = strlen(command);
-        if (len > 0 && command[len - 1] == '\n') {
-            command[len - 1] = '\0';
-        }
+        get_input(command, BUFFERSIZE);
+        add_request(&requests, command);
 
         if (strcmp(command, "R") == 0) {
             // Print all the requesrss if "R" is entered
-            print_rules(rules); // TODO Change
+            print_rules(requests); // TODO Change
         } else if (command[0] == 'A' && command[1] == ' ') {
             // Handle the "A IP Port" command
             char new_ip[BUFFERSIZE] = {0};
@@ -248,7 +278,11 @@ int main (int argc, char **argv) {
             }
         } else if (strcmp(command, "E") == 0) {
             isOnline = false;
-        } else {
+        } else if (strcmp(command, "L") == 0) {
+            //TODO Change Print rules and its connections
+            print_rules(rules);
+        }
+        else {
             printf("Command not recognised: %s\n", command);
         }
     }
