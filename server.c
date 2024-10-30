@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <stdbool.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include <stdio.h>
@@ -11,16 +10,24 @@
 
 #define BUFFERSIZE 256
 struct node {
-    char rule[BUFFERSIZE];
+    char ip[BUFFERSIZE];
     char port[BUFFERSIZE];
-    // struct node *matchedconnections;
+    struct node *matched_connections;
     struct node *next;
 };
+
+void get_input (char *input);
+// void print_requests(struct node *head) {
+//  //TODO
+//
+// }
+
+
 
 // Function to print all the rules in the linked list
 void print_rules(struct node *p) {
     while (p != NULL) {
-        printf("%s %s\n", p->rule, p->port);
+        printf("%s %s\n", p->ip, p->port);
         p = p->next;
     }
 }
@@ -33,21 +40,40 @@ bool only_digit(const char *str) {
     }
     return true;
 }
-bool valid_port(char *port) {
+bool valid_port(const char *port) {
     //to finish
     if (!only_digit(port)) {
         return false;
     }
-    int val = atoi(port);
-    if (val < 1 || val > 65535) {
+    long int val = strtol(port, NULL, 10);
+    if (val < 0 || val > 65535) {
         return false;
     }
     return true;
 }
 
-bool valid_ip(char *rule) {
+bool valid_ports(const char *port) {
     char temp[BUFFERSIZE];
-    strncpy(temp, rule ,BUFFERSIZE);
+    strncpy(temp, port,BUFFERSIZE);
+    char *left = strtok(temp, "-");
+    char *right = strtok(NULL, "-");
+
+    if (!left || !right || !only_digit(left) || !only_digit(right)) {
+        return false;
+    }
+
+    int left_int = atoi(left);
+    int right_int = atoi(right);
+
+    if (valid_port(left) && valid_port(right) && left_int <= right_int) {
+        return true;
+    }
+    return false;
+}
+
+bool valid_ip(const char *ip) {
+    char temp[BUFFERSIZE];
+    strncpy(temp, ip ,BUFFERSIZE);
     char *split = strtok(temp, ".");
     int parts = 0;
 
@@ -67,7 +93,7 @@ bool valid_ip(char *rule) {
     }
     return true;
 }
-bool valid_ip_range (char *ip_range) {
+bool valid_ip_range (const char *ip_range) {
     // xxx.xxx.xxx.xxx-xxx.xxx.xxx.xxx
     // xxx.xxx.xxx.xxx and xxx.xxx.xxx.xxx
     // run valid_ip on both
@@ -109,23 +135,65 @@ bool valid_ip_range (char *ip_range) {
     for (int i = 0; i < 4; i++) {
         if (left_ip[i] < right_ip[i]){
             return true;
-        } else if (left_ip[i] > right_ip[i]) {
-            return false;
         }
     }
     return false;
 }
 
+bool check_valid_rules(const char *ip ,const char *port) {
+    if(ip == NULL || port == NULL) {
+        return false;
+    }
+    bool is_valid_ip = false;
+    bool is_valid_port = false;
+
+    if (strchr(ip, '-')) {
+        is_valid_ip = valid_ip_range(ip);
+    } else {
+        is_valid_ip = valid_ip(ip);
+    }
+    if(strchr(port, '-')) {
+        is_valid_port = valid_ports(port);
+    } else {
+        is_valid_port = valid_port(port);
+    }
+
+    return is_valid_ip && is_valid_port;
+
+}
+void check_in_rule(char *ip_port) {
+    //
+    //TODO
+
+}
+void delete_matched_connections(struct node *connections_head) {
+    struct node *temp;
+    while (connections_head != NULL) {
+        temp = connections_head;
+        connections_head = connections_head->next;
+        free(temp);
+    }
+}
+// void delete_rules(struct node **head, const char *ip,const char *port) {
+//     //TODO
+//     struct node *temp = *head;
+//     struct node *prev = NULL;
+//
+//     while (temp != NULL) {
+//         if (strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
+//             delete_matched_connections(temp->matched_connections);
+//         }
+//     }
+// }
 // Function to add a new rule to the end of the linked list
-void add_rule(struct node **head, char *new_rule, char *new_port) {
+void add_rule(struct node **head, char *new_ip, char *new_port) {
     struct node *new_node = (struct node*)malloc(sizeof(struct node));
     if (new_node == NULL) {
         perror("malloc");
         return;
     }
-
     // Copy the new rule into the node
-    strcpy(new_node->rule, new_rule);
+    strcpy(new_node->ip, new_ip);
     strcpy(new_node->port, new_port);
     new_node->next = NULL;
 
@@ -146,8 +214,8 @@ bool isOnline = false;
 
 int main (int argc, char **argv) {
     char command[BUFFERSIZE];
-
-    struct node *head = NULL;
+    struct node *rules = NULL;
+    // struct node *requests = NULL;
     if(argc == 2 && strcmp(argv[1],"-i") == 0) {
         isOnline = true;
         printf("Server Running\n");
@@ -164,36 +232,21 @@ int main (int argc, char **argv) {
         }
 
         if (strcmp(command, "R") == 0) {
-            // Print all the rules if "R" is entered
-            print_rules(head);
+            // Print all the requesrss if "R" is entered
+            print_rules(rules); // TODO Change
         } else if (command[0] == 'A' && command[1] == ' ') {
             // Handle the "A IP Port" command
-            char new_ip[BUFFERSIZE];
-            char new_port[BUFFERSIZE];
-            int args = sscanf(command + 2, "%s %s", new_ip, new_port);
-
-            // if(args == 2 && valid_ip(new_rule) && valid_port(new_port)) {
-            //     add_rule(&head, new_rule, new_port);
-            //     printf("Rule added\n");
-            // }
-            if (args == 2 && strchr(new_ip,'-')) {
-                if (valid_ip_range(new_ip) && valid_port(new_port)) {
-                    add_rule(&head, new_ip, new_port);
-                    printf("Rule added\n");
-                } else {
-                    printf("Invalid Rule\n");
-                }
-            }
-            else if (args == 2 && !strchr(new_ip, '-')) {
-                if (valid_ip(new_ip) && valid_port(new_port)) {
-                    add_rule(&head, new_ip, new_port);
-                    printf("Rule added\n");
-                }
-            }
-            else {
+            char new_ip[BUFFERSIZE] = {0};
+            char new_port[BUFFERSIZE] = {0};
+            char extra[BUFFERSIZE] = {0};
+            int args = sscanf(command + 2, "%s %s %s", new_ip, new_port, extra);
+            if (args == 2 && check_valid_rules(new_ip, new_port)) {
+                add_rule(&rules, new_ip, new_port);
+                printf("Rules added\n");
+            } else {
                 printf("Invalid Rule\n");
             }
-        } else if (strcmp(command, "e") == 0) {
+        } else if (strcmp(command, "E") == 0) {
             isOnline = false;
         } else {
             printf("Command not recognised: %s\n", command);
@@ -202,9 +255,9 @@ int main (int argc, char **argv) {
 
     // Free allocated memory for the linked list
     struct node *temp;
-    while (head != NULL) {
-        temp = head;
-        head = head->next;
+    while (rules != NULL) {
+        temp = rules;
+        rules = rules->next;
         free(temp);
     }
 
