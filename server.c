@@ -115,7 +115,7 @@ bool valid_ip(const char *ip) {
         if (!only_digit(split)) {
             return false;
         }
-        int num = atoi(split);
+        long int num = strtol(split, NULL, 10);
         if (num < 0 || num > 255) {
             return false;
         }
