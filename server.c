@@ -17,6 +17,23 @@ struct node {
     struct node *next;
 };
 
+void get_input (char *buffer, int size);
+void add_request(struct node **head, char *new_ip);
+void print_rules(struct node *p);
+bool only_digit(const char *str);
+bool valid_port(const char *port);
+bool valid_ports(const char *port);
+bool valid_ip(const char *ip);
+bool valid_ip_range (const char *ip_range);
+bool check_valid_rules(const char *ip ,const char *port);
+void check_in_rule(char *ip_port);
+void delete_matched_connections(struct node *connections_head);
+void delete_rules(struct node **head, const char *ip,const char *port);
+void add_rule(struct node **head, char *new_ip, char *new_port);
+bool check_in_rule(struct node **head, char *ip, char *port);
+
+
+
 void get_input (char *buffer, int size) {
     if (fgets(buffer, size, stdin) != NULL) {
         size_t len = strlen(buffer);
@@ -196,29 +213,44 @@ bool check_valid_rules(const char *ip ,const char *port) {
 
 }
 void check_in_rule(char *ip_port) {
-    //
     //TODO
-
 }
-// void delete_matched_connections(struct node *connections_head) {
-//     struct node *temp;
-//     while (connections_head != NULL) {
-//         temp = connections_head;
-//         connections_head = connections_head->next;
-//         free(temp);
-//     }
-// }
-// void delete_rules(struct node **head, const char *ip,const char *port) {
-//     //TODO
-//     struct node *temp = *head;
-//     struct node *prev = NULL;
-//
-//     while (temp != NULL) {
-//         if (strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
-//             delete_matched_connections(temp->matched_connections);
-//         }
-//     }
-// }
+void delete_matched_connections(struct node *connections_head) {
+    //TODO
+}
+void delete_rules(struct node **head, const char *ip, const char *port) {
+    if (*head == NULL) {
+        printf("Rule Invalid\n");
+        return;
+    }
+
+    struct node *temp = *head, *prev = NULL;
+
+    // Check if the head node needs to be deleted
+    while (temp != NULL && strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
+        *head = temp->next;
+        free(temp);
+        temp = *head;
+        printf("Rules deleted\n");
+        return;
+    }
+
+    // Traverse the list to find the matching node
+    while (temp != NULL) {
+        if (strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
+            prev->next = temp->next;
+            free(temp);
+            printf("Rules deleted\n");
+            return;
+        }
+        prev = temp;
+        temp = temp->next;
+    }
+
+    // If we exit the loop without deleting, the rule wasn't found
+    printf("Rule Invalid\n");
+}
+
 // Function to add a new rule to the end of the linked list
 void add_rule(struct node **head, char *new_ip, char *new_port) {
     struct node *new_node = (struct node*)malloc(sizeof(struct node));
@@ -274,6 +306,18 @@ int main (int argc, char **argv) {
                 add_rule(&rules, new_ip, new_port);
                 printf("Rules added\n");
             } else {
+                printf("Invalid Rule\n");
+            }
+        } else if (command[0] == 'D' && command[1] == ' ') {
+            char ip_delete[BUFFERSIZE] = {0};
+            char port_delete[BUFFERSIZE] = {0};
+            char extra[BUFFERSIZE] = {0};
+            int args = sscanf(command + 2, "%s %s %s", ip_delete, port_delete, extra);
+            if (args == 2 && check_valid_rules(ip_delete, port_delete)) {
+                delete_rules(&rules, ip_delete, port_delete);
+                //TODO Check printing bug and deleting
+            } else {
+                //TODO Check this
                 printf("Invalid Rule\n");
             }
         } else if (strcmp(command, "E") == 0) {
