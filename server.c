@@ -19,17 +19,18 @@ struct node {
 
 void get_input (char *buffer, int size);
 void add_request(struct node **head, char *new_ip);
-void print_rules(struct node *p);
+void print_rules(struct node **rules_head);
 bool only_digit(const char *str);
 bool valid_port(const char *port);
 bool valid_ports(const char *port);
 bool valid_ip(const char *ip);
 bool valid_ip_range (const char *ip_range);
 bool check_valid_rules(const char *ip ,const char *port);
-void delete_matched_connections(struct node *connections_head);
+void delete_matched_connections(struct node **connections_head);
 void delete_rules(struct node **head, const char *ip,const char *port);
 void add_rule(struct node **head, char *new_ip, char *new_port);
-bool check_in_rule(struct node **head, char *ip, char *port);
+void check_in_rule(struct node **head, char *ip, char *port);
+void add_matched_connection(struct node *head, char *ip, char *port);
 
 
 
@@ -71,9 +72,13 @@ void add_request(struct node **head, char *new_ip) {
 
 
 // Function to print all the rules in the linked list
-void print_rules(struct node *p) {
+void print_rules(struct node **rules_head) {
+    struct node *p = *rules_head;
     while (p != NULL) {
-        printf("%s %s\n", p->ip, p->port);
+        printf("Rule: %s %s\n", p->ip, p->port);
+        if (p->matched_connections != NULL){
+            printf("Query: %s %s\n", p->matched_connections->ip, p->matched_connections->port);
+        }
         p = p->next;
     }
 }
@@ -208,18 +213,34 @@ bool check_valid_rules(const char *ip ,const char *port) {
 
 }
 
-bool check_in_rule(struct node **head, char *ip, char *port) {
-    struct node *temp = *head;
+void add_matched_connection(struct node *head, char *ip, char *port) {
+    struct node *new_node = (struct node*)malloc(sizeof(struct node));
+    if (new_node == NULL) {
+        perror("malloc");
+        exit(1);
+    }
+    strncpy(new_node->ip, ip, BUFFERSIZE - 1);
+    new_node -> ip[BUFFERSIZE - 1] = '\0';
+    strncpy(new_node->port, port, BUFFERSIZE - 1);
+    new_node -> port[BUFFERSIZE - 1] = '\0';
+
+    new_node->next = head->matched_connections;
+    head->matched_connections = new_node;
+}
+
+void check_in_rule(struct node **head, char *ip, char *port) {
     if(!check_valid_rules(ip, port)) {
-        return false;
+        exit(1);
     }
+    struct node *current = *head;
     //TODO check this function
-    while (temp != NULL) {
-        if (strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
-            return true;
+    while (current != NULL) {
+        if (strcmp(current->ip, ip) == 0 && strcmp(current->port, port) == 0) {
+            add_matched_connection(*head, ip, port);
         }
-        temp = temp->next;
+        current = current->next;
     }
+
 }
 
 void delete_matched_connections(struct node **connections_head) {
@@ -237,9 +258,19 @@ void delete_matched_connections(struct node **connections_head) {
     (*connections_head)->matched_connections = NULL;
 
 }
+void free_list(struct node **head) {
+    struct node *current = *head;
+    while (current != NULL) {
+        delete_matched_connections(&current);
+        struct node *temp = current -> next;
+        free(current);
+        current = temp;
+    }
+}
+
 void delete_rules(struct node **head, const char *ip, const char *port) {
     if (*head == NULL) {
-        printf("Rule Invalid\n");
+        printf("Rule Invalid\n");  // No changes here
         return;
     }
 
@@ -248,20 +279,22 @@ void delete_rules(struct node **head, const char *ip, const char *port) {
     // Check if the head node needs to be deleted
     while (temp != NULL && strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
         *head = temp->next;
-        delete_matched_connections(temp);
+        delete_matched_connections(&temp);
         free(temp);
-        temp = *head;
-        printf("Rules deleted\n");
+        temp = *head; // Move to the next node
+        printf("Rules deleted\n");  // Keep here if only the head is deleted
         return;
     }
 
-    // Traverse the list to find the matching node
+    // Traverse the list to find and delete a matching node
     while (temp != NULL) {
         if (strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
-            prev->next = temp->next;
-            delete_matched_connections(temp);
+            if (prev != NULL) {             // Check if prev is not NULL
+                prev->next = temp->next;    // Link previous node to temp's next
+            }
+            delete_matched_connections(&temp);
             free(temp);
-            printf("Rules deleted\n");
+            printf("Rules deleted\n");  // Removed duplication in traversal
             return;
         }
         prev = temp;
@@ -269,7 +302,7 @@ void delete_rules(struct node **head, const char *ip, const char *port) {
     }
 
     // If we exit the loop without deleting, the rule wasn't found
-    printf("Rule Invalid\n");
+    printf("Rule Invalid\n");  // No changes here
 }
 
 // Function to add a new rule to the end of the linked list
@@ -316,7 +349,7 @@ int main (int argc, char **argv) {
 
         if (strcmp(command, "R") == 0) {
             // Print all the requesrss if "R" is entered
-            print_rules(requests); // TODO Change
+            print_rules(&requests); // TODO Change
         } else if (command[0] == 'A' && command[1] == ' ') {
             // Handle the "A IP Port" command
             char new_ip[BUFFERSIZE] = {0};
@@ -343,13 +376,23 @@ int main (int argc, char **argv) {
             }
         } else if(command[0] == 'C' && command[1]== ' ') {
             //TODO Finish
+            char new_ip[BUFFERSIZE] = {0};
+            char new_port[BUFFERSIZE] = {0};
+            char extra[BUFFERSIZE] = {0};
+            int args = sscanf(command + 2, "%s %s %s", new_ip, new_port, extra);
+            if (args == 2 && check_valid_rules(new_ip, new_port)) {
+                check_in_rule(&rules, new_ip, new_port);
+                printf("Rules added\n");
+            } else {
+                printf("Invalid Rule\n");
+            }
 
 
         } else if (strcmp(command, "E") == 0) {
             isOnline = false;
         } else if (strcmp(command, "L") == 0) {
             //TODO Change Print rules and its connections
-            print_rules(rules);
+            print_rules(&rules);
         }
         else {
             printf("Command not recognised: %s\n", command);
@@ -357,12 +400,8 @@ int main (int argc, char **argv) {
     }
 
     // Free allocated memory for the linked list
-    struct node *temp;
-    while (rules != NULL) {
-        temp = rules;
-        rules = rules->next;
-        free(temp);
-    }
+    free_list(&rules);
+    free_list(&requests);
 
     return 0;
 }
