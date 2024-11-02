@@ -26,7 +26,6 @@ bool valid_ports(const char *port);
 bool valid_ip(const char *ip);
 bool valid_ip_range (const char *ip_range);
 bool check_valid_rules(const char *ip ,const char *port);
-void check_in_rule(char *ip_port);
 void delete_matched_connections(struct node *connections_head);
 void delete_rules(struct node **head, const char *ip,const char *port);
 void add_rule(struct node **head, char *new_ip, char *new_port);
@@ -45,10 +44,6 @@ void get_input (char *buffer, int size) {
     }
 }
 
-// void print_requests(struct node *head) {
-//  //TODO
-//
-// }
 
 void add_request(struct node **head, char *new_ip) {
     struct node *new_node = (struct node*)malloc(sizeof(struct node));
@@ -212,11 +207,35 @@ bool check_valid_rules(const char *ip ,const char *port) {
     return is_valid_ip && is_valid_port;
 
 }
-void check_in_rule(char *ip_port) {
-    //TODO
+
+bool check_in_rule(struct node **head, char *ip, char *port) {
+    struct node *temp = *head;
+    if(!check_valid_rules(ip, port)) {
+        return false;
+    }
+    //TODO check this function
+    while (temp != NULL) {
+        if (strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
+            return true;
+        }
+        temp = temp->next;
+    }
 }
-void delete_matched_connections(struct node *connections_head) {
+
+void delete_matched_connections(struct node **connections_head) {
     //TODO
+    if (*connections_head == NULL || (*connections_head)->matched_connections == NULL) return;
+
+    struct node *current = (*connections_head)->matched_connections;
+
+    while (current != NULL) {
+        struct node *temp = current->next;
+        free(current);
+        current = temp;
+    }
+
+    (*connections_head)->matched_connections = NULL;
+
 }
 void delete_rules(struct node **head, const char *ip, const char *port) {
     if (*head == NULL) {
@@ -229,6 +248,7 @@ void delete_rules(struct node **head, const char *ip, const char *port) {
     // Check if the head node needs to be deleted
     while (temp != NULL && strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
         *head = temp->next;
+        delete_matched_connections(temp);
         free(temp);
         temp = *head;
         printf("Rules deleted\n");
@@ -239,6 +259,7 @@ void delete_rules(struct node **head, const char *ip, const char *port) {
     while (temp != NULL) {
         if (strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
             prev->next = temp->next;
+            delete_matched_connections(temp);
             free(temp);
             printf("Rules deleted\n");
             return;
@@ -320,6 +341,10 @@ int main (int argc, char **argv) {
                 //TODO Check this
                 printf("Invalid Rule\n");
             }
+        } else if(command[0] == 'C' && command[1]== ' ') {
+            //TODO Finish
+
+
         } else if (strcmp(command, "E") == 0) {
             isOnline = false;
         } else if (strcmp(command, "L") == 0) {
