@@ -31,6 +31,7 @@ void delete_rules(struct node **head, const char *ip,const char *port);
 void add_rule(struct node **head, char *new_ip, char *new_port);
 void check_in_rule(struct node **head, char *ip, char *port);
 void add_matched_connection(struct node *head, char *ip, char *port);
+void free_list(struct node **head);
 
 
 
@@ -76,8 +77,10 @@ void print_rules(struct node **rules_head) {
     struct node *p = *rules_head;
     while (p != NULL) {
         printf("Rule: %s %s\n", p->ip, p->port);
-        if (p->matched_connections != NULL){
-            printf("Query: %s %s\n", p->matched_connections->ip, p->matched_connections->port);
+        struct node *queries = p->matched_connections;
+        while (queries != NULL) {
+            printf("Query: %s %s\n", queries->ip, queries->port);
+            queries = queries->next;
         }
         p = p->next;
     }
