@@ -18,7 +18,7 @@ struct node {
 };
 
 void get_input (char *buffer, int size);
-void add_request(struct node **head, char *new_ip);
+void add_request(struct node **head, char *request);
 void print_rules(struct node **rules_head);
 bool only_digit(const char *str);
 bool valid_port(const char *port);
@@ -47,14 +47,14 @@ void get_input (char *buffer, int size) {
 }
 
 
-void add_request(struct node **head, char *new_ip) {
+void add_request(struct node **head, char *request) {
     struct node *new_node = (struct node*)malloc(sizeof(struct node));
     if (new_node == NULL) {
         perror("malloc");
         return;
     }
     // Copy the new rule into the node
-    strcpy(new_node->ip, new_ip);
+    strcpy(new_node->ip, request);
     new_node->next = NULL;
 
 
@@ -231,19 +231,131 @@ void add_matched_connection(struct node *head, char *ip, char *port) {
     head->matched_connections = new_node;
 }
 
-void check_in_rule(struct node **head, char *ip, char *port) {
-    if(!check_valid_rules(ip, port)) {
-        exit(1);
-    }
-    struct node *current = *head;
-    //TODO check this function
-    while (current != NULL) {
-        if (strcmp(current->ip, ip) == 0 && strcmp(current->port, port) == 0) {
-            add_matched_connection(*head, ip, port);
-        }
-        current = current->next;
+bool within_ports(const char *port_range, const char *port) {
+    char temp[BUFFERSIZE];
+    strncpy(temp, port_range, BUFFERSIZE - 1);
+    temp[BUFFERSIZE - 1] = '\0'; // Ensure null-termination
+
+    char *left = strtok(temp, "-");
+    char *right = strtok(NULL, "-");
+
+    // Validate range bounds
+    if (!left || !right || !valid_port(left) || !valid_port(right)) {
+        return false;
     }
 
+    int left_int = atoi(left);
+    int right_int = atoi(right);
+
+    // Ensure the range is in proper order
+    if (left_int > right_int) {
+        return false;
+    }
+
+    // Convert port to an integer and validate
+    if (!valid_port(port)) {
+        return false;
+    }
+    int port_int = atoi(port);
+
+    // Check if port is within range
+    return (port_int >= left_int && port_int <= right_int);
+}
+
+
+bool within_ip_range(const char *range, const char *ip) {
+    char temp[BUFFERSIZE];
+    char temp_ip[BUFFERSIZE];
+    strncpy(temp_ip, ip, BUFFERSIZE);
+    strncpy(temp, range, BUFFERSIZE);
+    char *left = strtok(temp, "-");
+    char *right = strtok(NULL, "-");
+
+    if (left == NULL || right == NULL || !valid_ip(left) || !valid_ip(right) || !valid_ip(ip)) {
+        return false;
+    }
+
+    int left_ip[4], right_ip[4], target_ip[4];
+    char *split;
+
+    // Parse left IP
+    split = strtok(left, ".");
+    for (int i = 0; i < 4 && split != NULL; i++) {
+        left_ip[i] = atoi(split);
+        split = strtok(NULL, ".");
+    }
+
+    // Parse right IP
+    split = strtok(right, ".");
+    for (int i = 0; i < 4 && split != NULL; i++) {
+        right_ip[i] = atoi(split);
+        split = strtok(NULL, ".");
+    }
+
+    // Parse target IP
+    split = strtok(temp_ip, ".");
+    for (int i = 0; i < 4 && split != NULL; i++) {
+        target_ip[i] = atoi(split);
+        split = strtok(NULL, ".");
+    }
+
+    // Check if target_ip is within [left_ip, right_ip] including boundaries
+    bool within_lower = true;
+    bool within_upper = true;
+
+    for (int i = 0; i < 4; i++) {
+        if (target_ip[i] < left_ip[i]) {
+            within_lower = false;
+            break;
+        } else if (target_ip[i] > left_ip[i]) {
+            break;
+        }
+    }
+
+    for (int i = 0; i < 4 && within_lower; i++) {
+        if (target_ip[i] > right_ip[i]) {
+            within_upper = false;
+            break;
+        } else if (target_ip[i] < right_ip[i]) {
+            break;
+        }
+    }
+
+    return within_lower && within_upper;
+}
+
+void check_in_rule(struct node **head, char *ip, char *port) {
+    if (!check_valid_rules(ip, port)) {
+        exit(1);
+    }
+
+    struct node *current = *head;
+
+    while (current != NULL) {
+        bool inIp = false;
+        bool inPort = false;
+
+        // Check IP
+        if (strchr(current->ip, '-')) {  // IP Range
+            inIp = within_ip_range(current->ip, ip);
+        } else {  // Exact IP
+            inIp = (strcmp(current->ip, ip) == 0);
+        }
+
+        // Check Port
+        if (strchr(current->port, '-')) {  // Port Range
+            inPort = within_ports(current->port, port);
+        } else {  // Exact Port
+            inPort = (strcmp(current->port, port) == 0);
+        }
+
+        // If both IP and Port match the criteria
+        if (inIp && inPort) {
+            add_matched_connection(current, ip, port);
+        }
+
+        current = current->next;
+    }
 }
 
 void delete_matched_connections(struct node **connections_head) {
@@ -335,17 +447,16 @@ void add_rule(struct node **head, char *new_ip, char *new_port) {
 
 
 int main (int argc, char **argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
     char command[BUFFERSIZE];
     struct node *rules = NULL;
     struct node *requests = NULL;
     // struct node *requests = NULL;
     if(argc == 2 && strcmp(argv[1],"-i") == 0) {
         isOnline = true;
-        printf("Server Running\n");
     }
     // Main server loop
     while (isOnline) {
-        printf("Enter a command: ");
 
         get_input(command, BUFFERSIZE);
         add_request(&requests, command);
@@ -361,7 +472,7 @@ int main (int argc, char **argv) {
             int args = sscanf(command + 2, "%s %s %s", new_ip, new_port, extra);
             if (args == 2 && check_valid_rules(new_ip, new_port)) {
                 add_rule(&rules, new_ip, new_port);
-                printf("Rules added\n");
+                printf("Rule added\n");
             } else {
                 printf("Invalid Rule\n");
             }
@@ -390,15 +501,11 @@ int main (int argc, char **argv) {
                 printf("Invalid Rule\n");
             }
 
-
         } else if (strcmp(command, "E") == 0) {
             isOnline = false;
         } else if (strcmp(command, "L") == 0) {
             //TODO Change Print rules and its connections
             print_rules(&rules);
-        }
-        else {
-            printf("Command not recognised: %s\n", command);
         }
     }
 
