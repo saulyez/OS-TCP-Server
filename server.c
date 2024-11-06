@@ -465,16 +465,9 @@ void add_rule(struct node **head, char *new_ip, char *new_port) {
     }
 }
 
-
-
-int main (int argc, char **argv) {
-    setvbuf(stdout, NULL, _IONBF, 0);
+void interactive_mode() {
     char command[BUFFERSIZE];
-    // struct node *requests = NULL;
-    if(argc == 2 && strcmp(argv[1],"-i") == 0) {
-        isOnline = true;
-    }
-    // Main server loop
+     // Main server loop
     while (isOnline) {
 
         get_input(command, BUFFERSIZE);
@@ -526,6 +519,20 @@ int main (int argc, char **argv) {
             //TODO Change Print rules and its connections
             print_rules(&rules);
         }
+    }
+
+
+}
+
+
+
+
+int main (int argc, char **argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    // struct node *requests = NULL;
+    if(argc == 2 && strcmp(argv[1],"-i") == 0) {
+        isOnline = true;
+        interactive_mode();
     }
 
     // Free allocated memory for the linked list
