@@ -7,9 +7,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <pthread.h>
 
 #define BUFFERSIZE 256
 bool isOnline = false;
+struct node *rules = NULL;
+struct node *requests = NULL;
 struct node {
     char ip[BUFFERSIZE];
     char port[BUFFERSIZE];
@@ -32,6 +36,8 @@ void add_rule(struct node **head, char *new_ip, char *new_port);
 void check_in_rule(struct node **head, char *ip, char *port);
 void add_matched_connection(struct node *head, char *ip, char *port);
 void free_list(struct node **head);
+bool within_ip_range(const char *range, const char *ip);
+bool within_ports(const char *port_range, const char *port);
 
 
 
@@ -82,6 +88,13 @@ void print_rules(struct node **rules_head) {
             printf("Query: %s %s\n", queries->ip, queries->port);
             queries = queries->next;
         }
+        p = p->next;
+    }
+}
+void print_requests(struct node **request_head) {
+    struct node *p = *request_head;
+    while (p != NULL) {
+        printf("%s\n", p->ip);
         p = p->next;
     }
 }
@@ -326,11 +339,11 @@ bool within_ip_range(const char *range, const char *ip) {
 
 void check_in_rule(struct node **head, char *ip, char *port) {
     if (!check_valid_rules(ip, port)) {
-        exit(1);
+        perror("Illegal IP address or port Specified");
     }
 
     struct node *current = *head;
-
+    //TODO check its adding to all nodes. not the first one
     while (current != NULL) {
         bool inIp = false;
         bool inPort = false;
@@ -352,6 +365,10 @@ void check_in_rule(struct node **head, char *ip, char *port) {
         // If both IP and Port match the criteria
         if (inIp && inPort) {
             add_matched_connection(current, ip, port);
+            printf("Connection accepted\n");
+            return;
+        } else {
+            printf("Connection rejected\n");
         }
 
         current = current->next;
@@ -384,8 +401,12 @@ void free_list(struct node **head) {
 }
 
 void delete_rules(struct node **head, const char *ip, const char *port) {
+    if (!check_valid_rules(ip, port)) {
+        perror("Rule Invalid");
+        return;
+    }
     if (*head == NULL) {
-        printf("Rule Invalid\n");  // No changes here
+        printf("Rule not found\n");  // No changes here
         return;
     }
 
@@ -417,14 +438,13 @@ void delete_rules(struct node **head, const char *ip, const char *port) {
     }
 
     // If we exit the loop without deleting, the rule wasn't found
-    printf("Rule Invalid\n");  // No changes here
+    printf("Rule not found\n");  // No changes here
 }
 
 // Function to add a new rule to the end of the linked list
 void add_rule(struct node **head, char *new_ip, char *new_port) {
     struct node *new_node = (struct node*)malloc(sizeof(struct node));
     if (new_node == NULL) {
-        perror("malloc");
         return;
     }
     // Copy the new rule into the node
@@ -446,11 +466,10 @@ void add_rule(struct node **head, char *new_ip, char *new_port) {
 }
 
 
+
 int main (int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     char command[BUFFERSIZE];
-    struct node *rules = NULL;
-    struct node *requests = NULL;
     // struct node *requests = NULL;
     if(argc == 2 && strcmp(argv[1],"-i") == 0) {
         isOnline = true;
@@ -462,8 +481,8 @@ int main (int argc, char **argv) {
         add_request(&requests, command);
 
         if (strcmp(command, "R") == 0) {
-            // Print all the requesrss if "R" is entered
-            print_rules(&requests); // TODO Change
+            // Print all the requests if "R" is entered
+            print_requests(&requests); // TODO Change
         } else if (command[0] == 'A' && command[1] == ' ') {
             // Handle the "A IP Port" command
             char new_ip[BUFFERSIZE] = {0};
@@ -473,6 +492,7 @@ int main (int argc, char **argv) {
             if (args == 2 && check_valid_rules(new_ip, new_port)) {
                 add_rule(&rules, new_ip, new_port);
                 printf("Rule added\n");
+                //TODO check the printing
             } else {
                 printf("Invalid Rule\n");
             }
@@ -496,7 +516,6 @@ int main (int argc, char **argv) {
             int args = sscanf(command + 2, "%s %s %s", new_ip, new_port, extra);
             if (args == 2 && check_valid_rules(new_ip, new_port)) {
                 check_in_rule(&rules, new_ip, new_port);
-                printf("Rules added\n");
             } else {
                 printf("Invalid Rule\n");
             }
