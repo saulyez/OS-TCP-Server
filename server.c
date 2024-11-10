@@ -3,19 +3,60 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <string.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <netinet/in.h>
 
 #define BUFFERSIZE 256
 bool isOnline = false;
+pthread_rwlock_t lock = PTHREAD_RWLOCK_INITIALIZER;
+int global_port;
+
+struct node *rules = NULL;
+struct node *requests = NULL;
 struct node {
     char ip[BUFFERSIZE];
     char port[BUFFERSIZE];
     struct node *matched_connections;
     struct node *next;
 };
+
+void get_input (char *buffer, int size);
+void add_request(struct node **head, char *request);
+void print_rules(struct node **rules_head, int sock);
+bool only_digit(const char *str);
+bool valid_port(const char *port);
+bool valid_ports(const char *port);
+bool valid_ip(const char *ip);
+bool valid_ip_range (const char *ip_range);
+bool check_valid_rules(const char *ip ,const char *port);
+void delete_matched_connections(struct node **connections_head);
+void delete_rules(struct node **head, const char *ip,const char *port, int client_port);
+void add_rule(struct node **head, char *new_ip, char *new_port, int client_socket);
+void check_in_rule(struct node **head, char *ip, char *port, int client_socket);
+void add_matched_connection(struct node *head, char *ip, char *port);
+void free_list(struct node **head);
+bool within_ip_range(const char *range, const char *ip);
+bool within_ports(const char *port_range, const char *port);
+
+
+void error(char *msg)
+{
+    perror(msg);
+    exit(1);
+}
+
+void print_send (const char *msg, int socket) {
+    if (socket < 0) {
+        printf("%s",msg);
+    } else {
+        send(socket, msg, strlen(msg), 0);
+    }
+}
 
 void get_input (char *buffer, int size) {
     if (fgets(buffer, size, stdin) != NULL) {
@@ -28,19 +69,14 @@ void get_input (char *buffer, int size) {
     }
 }
 
-// void print_requests(struct node *head) {
-//  //TODO
-//
-// }
 
-void add_request(struct node **head, char *new_ip) {
+void add_request(struct node **head, char *request) {
     struct node *new_node = (struct node*)malloc(sizeof(struct node));
     if (new_node == NULL) {
-        perror("malloc");
         return;
     }
     // Copy the new rule into the node
-    strcpy(new_node->ip, new_ip);
+    strcpy(new_node->ip, request);
     new_node->next = NULL;
 
 
@@ -59,9 +95,42 @@ void add_request(struct node **head, char *new_ip) {
 
 
 // Function to print all the rules in the linked list
-void print_rules(struct node *p) {
+void print_rules(struct node **rules_head, int sock) {
+    struct node *p = *rules_head;
     while (p != NULL) {
-        printf("%s %s\n", p->ip, p->port);
+        char *message;
+        size_t size = snprintf(NULL, 0, "Rule: %s %s\n", p->ip, p->port);
+        message = malloc(size + 1);
+        snprintf(message, size + 1, "Rule: %s %s\n", p->ip, p->port);
+        print_send(message, sock);
+        free(message);
+        message = NULL;
+        struct node *queries = p->matched_connections;
+        while (queries != NULL) {
+            size_t size = snprintf(NULL, 0, "Query: %s %s\n", queries->ip, queries->port);;
+            message = malloc(size + 1);
+            snprintf(message, size + 1, "Query: %s %s\n", queries->ip, queries->port);;
+            print_send(message, sock);
+            free(message);
+            message = NULL;
+            queries = queries->next;
+        }
+        p = p->next;
+    }
+}
+void print_requests(struct node **request_head, int sock) {
+    struct node *p = *request_head;
+    if (p == NULL) {
+        return;
+    }
+    char *request;
+    while (p != NULL) {
+        size_t size = snprintf(NULL, 0, "%s\n", p->ip);
+        request = malloc(size + 1);
+        snprintf(request, size + 1, "%s\n", p->ip);
+        print_send(request, sock);
+        free(request);
+        request = NULL;
         p = p->next;
     }
 }
@@ -175,7 +244,7 @@ bool valid_ip_range (const char *ip_range) {
 }
 
 bool check_valid_rules(const char *ip ,const char *port) {
-    if(ip == NULL || port == NULL) {
+    if(ip == NULL || port == NULL || strlen(ip) == 0 || strlen(port) == 0) {
         return false;
     }
     bool is_valid_ip = false;
@@ -195,35 +264,226 @@ bool check_valid_rules(const char *ip ,const char *port) {
     return is_valid_ip && is_valid_port;
 
 }
-void check_in_rule(char *ip_port) {
-    //
-    //TODO
 
-}
-// void delete_matched_connections(struct node *connections_head) {
-//     struct node *temp;
-//     while (connections_head != NULL) {
-//         temp = connections_head;
-//         connections_head = connections_head->next;
-//         free(temp);
-//     }
-// }
-// void delete_rules(struct node **head, const char *ip,const char *port) {
-//     //TODO
-//     struct node *temp = *head;
-//     struct node *prev = NULL;
-//
-//     while (temp != NULL) {
-//         if (strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
-//             delete_matched_connections(temp->matched_connections);
-//         }
-//     }
-// }
-// Function to add a new rule to the end of the linked list
-void add_rule(struct node **head, char *new_ip, char *new_port) {
+void add_matched_connection(struct node *head, char *ip, char *port) {
     struct node *new_node = (struct node*)malloc(sizeof(struct node));
     if (new_node == NULL) {
-        perror("malloc");
+        return;
+    }
+    strncpy(new_node->ip, ip, BUFFERSIZE - 1);
+    new_node -> ip[BUFFERSIZE - 1] = '\0';
+    strncpy(new_node->port, port, BUFFERSIZE - 1);
+    new_node -> port[BUFFERSIZE - 1] = '\0';
+
+    new_node->next = head->matched_connections;
+    head->matched_connections = new_node;
+}
+
+bool within_ports(const char *port_range, const char *port) {
+    char temp[BUFFERSIZE];
+    strncpy(temp, port_range, BUFFERSIZE - 1);
+    temp[BUFFERSIZE - 1] = '\0'; // Ensure null-termination
+
+    char *left = strtok(temp, "-");
+    char *right = strtok(NULL, "-");
+
+    // Validate range bounds
+    if (!left || !right || !valid_port(left) || !valid_port(right)) {
+        return false;
+    }
+
+    int left_int = atoi(left);
+    int right_int = atoi(right);
+
+    // Ensure the range is in proper order
+    if (left_int > right_int) {
+        return false;
+    }
+
+    // Convert port to an integer and validate
+    if (!valid_port(port)) {
+        return false;
+    }
+    int port_int = atoi(port);
+
+    // Check if port is within range
+    return (port_int >= left_int && port_int <= right_int);
+}
+
+
+bool within_ip_range(const char *range, const char *ip) {
+    char temp[BUFFERSIZE];
+    char temp_ip[BUFFERSIZE];
+    strncpy(temp_ip, ip, BUFFERSIZE);
+    strncpy(temp, range, BUFFERSIZE);
+    char *left = strtok(temp, "-");
+    char *right = strtok(NULL, "-");
+
+    if (left == NULL || right == NULL || !valid_ip(left) || !valid_ip(right) || !valid_ip(ip)) {
+        return false;
+    }
+
+    int left_ip[4], right_ip[4], target_ip[4];
+    char *split;
+
+    // Parse left IP
+    split = strtok(left, ".");
+    for (int i = 0; i < 4 && split != NULL; i++) {
+        left_ip[i] = atoi(split);
+        split = strtok(NULL, ".");
+    }
+
+    // Parse right IP
+    split = strtok(right, ".");
+    for (int i = 0; i < 4 && split != NULL; i++) {
+        right_ip[i] = atoi(split);
+        split = strtok(NULL, ".");
+    }
+
+    // Parse target IP
+    split = strtok(temp_ip, ".");
+    for (int i = 0; i < 4 && split != NULL; i++) {
+        target_ip[i] = atoi(split);
+        split = strtok(NULL, ".");
+    }
+
+    // Check if target_ip is within [left_ip, right_ip] including boundaries
+    bool within_lower = true;
+    bool within_upper = true;
+
+    for (int i = 0; i < 4; i++) {
+        if (target_ip[i] < left_ip[i]) {
+            within_lower = false;
+            break;
+        } else if (target_ip[i] > left_ip[i]) {
+            break;
+        }
+    }
+
+    for (int i = 0; i < 4 && within_lower; i++) {
+        if (target_ip[i] > right_ip[i]) {
+            within_upper = false;
+            break;
+        } else if (target_ip[i] < right_ip[i]) {
+            break;
+        }
+    }
+
+    return within_lower && within_upper;
+}
+
+void check_in_rule(struct node **head, char *ip, char *port, int client_socket) {
+    if (!check_valid_rules(ip, port)) {
+        print_send("Illegal IP address or port specified", client_socket);
+        return;
+    }
+
+    struct node *current = *head;
+    //TODO check its adding to all nodes. not the first one
+    while (current != NULL) {
+        bool inIp = false;
+        bool inPort = false;
+
+        // Check IP
+        if (strchr(current->ip, '-')) {  // IP Range
+            inIp = within_ip_range(current->ip, ip);
+        } else {  // Exact IP
+            inIp = (strcmp(current->ip, ip) == 0);
+        }
+
+        // Check Port
+        if (strchr(current->port, '-')) {  // Port Range
+            inPort = within_ports(current->port, port);
+        } else {  // Exact Port
+            inPort = (strcmp(current->port, port) == 0);
+        }
+
+        // If both IP and Port match the criteria
+        if (inIp && inPort) {
+            add_matched_connection(current, ip, port);
+            print_send("Connection accepted", client_socket);
+            return;
+        } else {
+            print_send("Connection rejected", client_socket);
+        }
+
+        current = current->next;
+    }
+}
+
+void delete_matched_connections(struct node **connections_head) {
+    //TODO
+    if (*connections_head == NULL || (*connections_head)->matched_connections == NULL) return;
+
+    struct node *current = (*connections_head)->matched_connections;
+
+    while (current != NULL) {
+        struct node *temp = current->next;
+        free(current);
+        current = temp;
+    }
+
+    (*connections_head)->matched_connections = NULL;
+
+}
+void free_list(struct node **head) {
+    struct node *current = *head;
+    while (current != NULL) {
+        delete_matched_connections(&current);
+        struct node *temp = current -> next;
+        free(current);
+        current = temp;
+    }
+}
+
+void delete_rules(struct node **head, const char *ip, const char *port, int client_socket) {
+    if (!check_valid_rules(ip, port)) {
+        print_send("Rule invalid", client_socket);
+        return;
+    }
+    if (*head == NULL) {
+        print_send("Rule not found", client_socket);
+        return;
+    }
+
+    struct node *temp = *head, *prev = NULL;
+
+    // Check if the head node needs to be deleted
+    while (temp != NULL && strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
+        *head = temp->next;
+        delete_matched_connections(&temp);
+        free(temp);
+        print_send("Rule deleted", client_socket);
+        temp = *head; // Move to the next node
+        return;
+    }
+
+    // Traverse the list to find and delete a matching node
+    while (temp != NULL) {
+        if (strcmp(temp->ip, ip) == 0 && strcmp(temp->port, port) == 0) {
+            if (prev != NULL) {             // Check if prev is not NULL
+                prev->next = temp->next;    // Link previous node to temp's next
+            }
+            delete_matched_connections(&temp);
+            free(temp);
+            print_send("Rule deleted\n", client_socket);
+            return;
+        }
+        prev = temp;
+        temp = temp->next;
+    }
+    print_send("Rule not found", client_socket);
+    return;
+}
+
+// Function to add a new rule to the end of the linked list
+void add_rule(struct node **head, char *new_ip, char *new_port, int client_socket) {
+    struct node *new_node = (struct node*)malloc(sizeof(struct node));
+    if (new_node == NULL) {
+        return;
+    }
+    if (!check_valid_rules(new_ip, new_port)) {
+        print_send("Rule invalid\n", client_socket);
         return;
     }
     // Copy the new rule into the node
@@ -242,58 +502,236 @@ void add_rule(struct node **head, char *new_ip, char *new_port) {
         }
         temp->next = new_node;
     }
+    print_send("Rule added\n", client_socket);
 }
-
-
-int main (int argc, char **argv) {
+void interactive_mode() {
     char command[BUFFERSIZE];
-    struct node *rules = NULL;
-    struct node *requests = NULL;
-    // struct node *requests = NULL;
-    if(argc == 2 && strcmp(argv[1],"-i") == 0) {
-        isOnline = true;
-        printf("Server Running\n");
-    }
-    // Main server loop
+     // Main server loop
     while (isOnline) {
-        printf("Enter a command: ");
 
         get_input(command, BUFFERSIZE);
+        char new_ip[BUFFERSIZE] = {0};
+        char new_port[BUFFERSIZE] = {0};
+        char extra[BUFFERSIZE] = {0};
+        int args = sscanf(command + 2, "%s %s %s", new_ip, new_port, extra);
+        if (args > 2) {
+            break;
+        }
         add_request(&requests, command);
 
         if (strcmp(command, "R") == 0) {
-            // Print all the requesrss if "R" is entered
-            print_rules(requests); // TODO Change
+            // Print all the requests if "R" is entered
+            print_requests(&requests, -1);
         } else if (command[0] == 'A' && command[1] == ' ') {
             // Handle the "A IP Port" command
-            char new_ip[BUFFERSIZE] = {0};
-            char new_port[BUFFERSIZE] = {0};
-            char extra[BUFFERSIZE] = {0};
-            int args = sscanf(command + 2, "%s %s %s", new_ip, new_port, extra);
-            if (args == 2 && check_valid_rules(new_ip, new_port)) {
-                add_rule(&rules, new_ip, new_port);
-                printf("Rules added\n");
-            } else {
-                printf("Invalid Rule\n");
-            }
+
+            add_rule(&rules, new_ip, new_port, -1);
+            //TODO check the printing
+        } else if (command[0] == 'D' && command[1] == ' ') {
+            delete_rules(&rules, new_ip, new_port, -1);
+            //TODO Check printing bug and deleting
+        } else if(command[0] == 'C' && command[1]== ' ') {
+            check_in_rule(&rules, new_ip, new_port, -1);
         } else if (strcmp(command, "E") == 0) {
             isOnline = false;
         } else if (strcmp(command, "L") == 0) {
             //TODO Change Print rules and its connections
-            print_rules(rules);
+            print_rules(&rules, -1);
         }
-        else {
-            printf("Command not recognised: %s\n", command);
+    }
+}
+
+char *readRes(int sockfd) {
+    size_t bufsize;
+    int n;
+
+    // Read the size of the incoming message
+    n = recv(sockfd, &bufsize, sizeof(size_t), 0);
+    if (n != sizeof(size_t)) {
+        fprintf(stderr, "ERROR reading the size of the result from the socket\n");
+        return NULL;
+    }
+
+    // Allocate memory for the message
+    char *buffer = malloc(bufsize + 1); // +1 for null-termination
+    if (!buffer) {
+        fprintf(stderr, "ERROR allocating memory for the result buffer\n");
+        return NULL;
+    }
+
+    // Read the actual message
+    size_t total_bytes_read = 0;
+    while (total_bytes_read < bufsize) {
+        n = recv(sockfd, buffer + total_bytes_read, bufsize - total_bytes_read, 0);
+        if (n <= 0) {
+            fprintf(stderr, "ERROR reading the result from the socket\n");
+            free(buffer);
+            return NULL;
+        }
+        total_bytes_read += n; // Update total bytes read
+        if (buffer[total_bytes_read -1] == '\0') {
+            break;
         }
     }
 
-    // Free allocated memory for the linked list
-    struct node *temp;
-    while (rules != NULL) {
-        temp = rules;
-        rules = rules->next;
-        free(temp);
+    buffer[bufsize] = '\0'; // Null-terminate the string
+    return buffer;
+}
+
+int writeResult(int sockfd, const char *buffer, size_t bufsize) {
+    size_t n;
+
+    // Send the size of the message
+    n = send(sockfd, &bufsize, sizeof(size_t), 0);
+    if (n != sizeof(size_t)) {
+        fprintf(stderr, "ERROR sending the size of the result to the socket\n");
+        return -1;
     }
+
+    // Send the actual message
+    size_t total_bytes_sent = 0;
+    while (total_bytes_sent < bufsize) {
+        n = send(sockfd, buffer + total_bytes_sent, bufsize - total_bytes_sent, 0);
+        total_bytes_sent += n; // Update total bytes sent
+    }
+
+    return 0; // Success
+}
+
+void *processRequest(void *args) {
+    int *newsockfd = (int *)args;
+    char *request;
+    char new_ip[BUFFERSIZE], new_port[BUFFERSIZE];
+    char extra[2];
+    // Read the client's request
+    request = readRes(*newsockfd);
+    add_request(&requests, request);
+    if (!request) {
+        fprintf(stderr, "ERROR reading from socket\n");
+        close(*newsockfd);
+        free(newsockfd);
+        pthread_exit(NULL);
+    }
+    int argcount = sscanf(request + 2, "%s %s %s", new_ip, new_port, extra);
+    if (argcount >  2){
+        print_send("Illegal request\n", *newsockfd);
+        free(request);
+        close(*newsockfd);
+        free(newsockfd);
+        pthread_exit(NULL);
+    }
+    // Process commands
+    if (strcmp(request, "L") == 0) {
+        pthread_rwlock_rdlock(&lock);
+        print_rules(&rules, *newsockfd); // Send all rules to the client
+        pthread_rwlock_unlock(&lock);
+    } else if (strncmp(request, "A ", 2) == 0) {
+        if (argcount == 2) {
+            pthread_rwlock_wrlock(&lock);
+            add_rule(&rules, new_ip, new_port, *newsockfd);
+            pthread_rwlock_unlock(&lock);
+            // writeResult(*newsockfd, "Rule added\n", strlen("Rule added\n") + 1);
+        }
+        // else {
+        //     writeResult(*newsockfd, "Invalid rule\n", strlen("Invalid rule\n") + 1);
+        // }
+    } else if(strncmp(request, "D ",2) == 0) {
+        pthread_rwlock_rdlock(&lock);
+        delete_rules(&rules, new_ip, new_port, *newsockfd );
+        pthread_rwlock_unlock(&lock);
+        // writeResult(*newsockfd,);
+    } else if (strncmp(request, "C ",2) == 0){
+        pthread_rwlock_rdlock(&lock);
+        check_in_rule(&rules,new_ip,new_port, *newsockfd);
+        pthread_rwlock_unlock(&lock);
+    }else if (strcmp(request, "R") == 0) {
+        pthread_rwlock_rdlock(&lock);
+        print_requests(&requests, *newsockfd);
+        pthread_rwlock_unlock(&lock);
+    }
+    // Cleanup
+    free(request);
+    close(*newsockfd);
+    free(newsockfd);
+    pthread_exit(NULL);
+}
+
+void server_mode(int portno) {
+    int socket_fd, result;
+    struct sockaddr_in server_addr;
+
+    socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket_fd < 0) {
+        perror("Error creating socket");
+        exit(1);
+    }
+
+    bzero((char *)&server_addr, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(portno);
+
+    if (bind(socket_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Error on binding");
+        exit(1);
+    }
+
+    listen(socket_fd, 5);
+
+    while (1) {
+        pthread_t server_thread;
+        pthread_attr_t pthread_attr;
+        int *new_sockfd;
+        struct sockaddr_in client_addr;
+        socklen_t clilen = sizeof(client_addr);
+
+        new_sockfd = malloc(sizeof(int));
+        if (!new_sockfd) {
+            fprintf(stderr, "Error allocating memory\n");
+            continue;
+        }
+
+        *new_sockfd = accept(socket_fd, (struct sockaddr *)&client_addr, &clilen);
+        if (*new_sockfd < 0) {
+            perror("Error on accept");
+            free(new_sockfd);
+            continue;
+        }
+
+        if (pthread_attr_init(&pthread_attr)) {
+            fprintf(stderr, "Creating initial thread attributes failed\n");
+            exit(1);
+        }
+
+        if (pthread_attr_setdetachstate(&pthread_attr, PTHREAD_CREATE_DETACHED)) {
+            fprintf(stderr, "Setting thread attributes failed\n");
+            exit(1);
+        }
+
+        result = pthread_create(&server_thread, &pthread_attr, processRequest, (void *)new_sockfd);
+        if (result != 0) {
+            fprintf(stderr, "Thread creation failed\n");
+            free(new_sockfd);
+        }
+    }
+
+    close(socket_fd);
+}
+
+int main (int argc, char **argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    // struct node *requests = NULL;
+    if(argc == 2 && strcmp(argv[1],"-i") == 0) {
+        isOnline = true;
+        global_port = -1;
+        interactive_mode();
+    }
+    if (argc == 2 && valid_port(argv[1])) {
+        int port = atoi(argv[1]);
+        server_mode(port);
+    }
+    free_list(&rules);
+    free_list(&requests);
 
     return 0;
 }
