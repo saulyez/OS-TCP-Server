@@ -37,6 +37,32 @@ int writeResult(int sockfd, const char *buffer, size_t bufsize) {
     return 0; // Success
 }
 
+char *response(int sockfd){
+    char buffer[10];
+    ssize_t bytes_recieved;
+    size_t total = 0;
+    char *response = malloc(1);
+    response[0] = '\0';
+
+    while ((bytes_recieved = recv(sockfd, buffer, 9, 0)) > 0){
+        buffer[bytes_recieved] = '\0';
+        total += bytes_recieved;
+
+        response = realloc(response, total + 1);
+        if(!response){
+            perror("Failed to reallcate memory for response");
+            close(sockfd);
+            return NULL;
+        }
+        strcat(response, buffer);
+    }
+    if (bytes_recieved < 0){
+        return NULL;
+    }
+    return response;
+
+}
+
 /* Function to read a message from the socket */
 char *readRes(int sockfd) {
     size_t bufsize;
@@ -69,11 +95,6 @@ int main(int argc, char *argv[]) {
     int sockfd, res;
     struct addrinfo hints, *result, *rp;
     char buffer[BUFFERLENGTH];
-
-    if (argc != 4 && argc != 6) {
-        fprintf(stderr, "Usage: %s <hostname> <port>\n", argv[0]);
-        exit(EXIT_FAILURE);
-    }
 
     // Validate port number
     int port = atoi(argv[2]);
@@ -147,13 +168,12 @@ int main(int argc, char *argv[]) {
     }
 
     // Wait for a reply from the server
-    char *response = readRes(sockfd);
-    if (!response) {
+    char *response_msg = response(sockfd);
+    if (!response_msg) {
         fprintf(stderr, "ERROR: Failed to read response from server\n");
     }
-
-    printf("%s\n", response);
-    free(response);
+    printf("%s\n", response_msg);
+    free(response_msg);
 
     close(sockfd); // Clean up the socket
     return 0;
