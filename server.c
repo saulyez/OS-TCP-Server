@@ -12,10 +12,9 @@
 #include <netinet/in.h>
 
 #define BUFFERSIZE 256
-bool isOnline = false;
+volatile bool isOnline = false;
 pthread_rwlock_t lock = PTHREAD_RWLOCK_INITIALIZER;
 int global_port;
-
 struct node *rules = NULL;
 struct node *requests = NULL;
 struct node {
@@ -513,12 +512,14 @@ void interactive_mode() {
         char new_port[BUFFERSIZE] = {0};
         char extra[BUFFERSIZE] = {0};
         int args = sscanf(command + 2, "%s %s %s", new_ip, new_port, extra);
-        if (args > 2) {
-            break;
-        }
         add_request(&requests, command);
-
-        if (strcmp(command, "R") == 0) {
+        if (strlen(command) <= 0){
+            continue;
+        }
+        else if (args > 2) {
+            print_send("Invalid Request\n", -1);
+        }
+        else if (strcmp(command, "R") == 0) {
             // Print all the requests if "R" is entered
             print_requests(&requests, -1);
         } else if (command[0] == 'A' && command[1] == ' ') {
@@ -536,6 +537,8 @@ void interactive_mode() {
         } else if (strcmp(command, "L") == 0) {
             //TODO Change Print rules and its connections
             print_rules(&rules, -1);
+        } else {
+            print_send("Invalid Request\n", -1);
         }
     }
 }
@@ -600,62 +603,56 @@ int writeResult(int sockfd, const char *buffer, size_t bufsize) {
 void *processRequest(void *args) {
     int *newsockfd = (int *)args;
     char *request;
-    char new_ip[BUFFERSIZE], new_port[BUFFERSIZE];
-    int n = 0;
+    char command[2] = {0};
+    char new_ip[33] = {0};
+    char new_port[14] = {0};
+    char extra[2] = {0};
+
     // Read the client's request
     request = readRes(*newsockfd);
     add_request(&requests, request);
     if (!request) {
-        fprintf(stderr, "ERROR reading from socket\n");
+        fprintf(stderr, "Error reading from socket.\n");
         close(*newsockfd);
         free(newsockfd);
         pthread_exit(NULL);
     }
 
-    // if (strlen(request) < 2) {
-    //     print_send("Invalid request\n", *newsockfd);
-    //     free(request);
-    //     close(*newsockfd);
-    //     free(newsockfd);
-    //     pthread_exit(NULL);
-    // }
-    int argcount = sscanf(request + 2, "%32s %11s %n", new_ip, new_port, &n);
-    if(argcount > 2 || request[2 + n] != '\0'){
-        print_send("Illegal request\n", *newsockfd);
+    // Check for shutdown command
+    if (request[0] == 'E' && strlen(request) == 1) {
+        isOnline = false;
         free(request);
+        free(rules);
         close(*newsockfd);
         free(newsockfd);
         pthread_exit(NULL);
     }
 
-    // Process commands
-    if (request[0] == 'L') {
+    int argcount = sscanf(request, "%s %s %s %s", command, new_ip, new_port, extra);
+    if (argcount > 3) {
+        print_send("Illegal request\n", *newsockfd);
+    } else if (command[0] == 'L') {
         pthread_rwlock_rdlock(&lock);
-        print_rules(&rules, *newsockfd); // Send all rules to the client
+        print_rules(&rules, *newsockfd);
         pthread_rwlock_unlock(&lock);
-    } else if (request[0] == 'A' && request[1] == ' ') {
+    } else if (command[0] == 'A' && strlen(command) == 1) {
         pthread_rwlock_wrlock(&lock);
         add_rule(&rules, new_ip, new_port, *newsockfd);
         pthread_rwlock_unlock(&lock);
-
-    } else if(request[0] == 'D' && request[1] == ' ') {
+    } else if (command[0] == 'D') {
         pthread_rwlock_wrlock(&lock);
         delete_rules(&rules, new_ip, new_port, *newsockfd);
         pthread_rwlock_unlock(&lock);
-        // writeResult(*newsockfd,);
-    } else if (request[0] == 'C' && request[1] == ' '){
+    } else if (command[0] == 'C') {
         pthread_rwlock_rdlock(&lock);
-        check_in_rule(&rules,new_ip,new_port, *newsockfd);
+        check_in_rule(&rules, new_ip, new_port, *newsockfd);
         pthread_rwlock_unlock(&lock);
-    }else if (request[0] == 'R') {
+    } else if (command[0] == 'R') {
         pthread_rwlock_rdlock(&lock);
         print_requests(&requests, *newsockfd);
         pthread_rwlock_unlock(&lock);
-    } else if (request[0] == 'E') {
-        free(request);
-        close(*newsockfd);
-        free(newsockfd);
-        pthread_exit(NULL);
+    } else {
+        print_send("Illegal request\n", *newsockfd);
     }
 
     // Cleanup
@@ -666,9 +663,10 @@ void *processRequest(void *args) {
 }
 
 void server_mode(int portno) {
-    int socket_fd, result;
+    int socket_fd;
     struct sockaddr_in server_addr;
 
+    // Create the socket
     socket_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_fd < 0) {
         perror("Error creating socket");
@@ -680,26 +678,31 @@ void server_mode(int portno) {
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(portno);
 
+    // Bind the socket
     if (bind(socket_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Error on binding");
+        close(socket_fd);
         exit(1);
     }
 
-    listen(socket_fd, 5);
-
-    while (1) {
+    // Start listening for incoming connections
+    if (listen(socket_fd, 5) < 0) {
+        perror("Error on listening");
+        close(socket_fd);
+        exit(1);
+    }
+    while (true) {
         pthread_t server_thread;
-        pthread_attr_t pthread_attr;
-        int *new_sockfd;
-        struct sockaddr_in client_addr;
-        socklen_t clilen = sizeof(client_addr);
-
-        new_sockfd = malloc(sizeof(int));
+        int *new_sockfd = malloc(sizeof(int));
         if (!new_sockfd) {
-            fprintf(stderr, "Error allocating memory\n");
+            fprintf(stderr, "Error allocating memory for new socket.\n");
             continue;
         }
 
+        struct sockaddr_in client_addr;
+        socklen_t clilen = sizeof(client_addr);
+
+        // Accept a new connection
         *new_sockfd = accept(socket_fd, (struct sockaddr *)&client_addr, &clilen);
         if (*new_sockfd < 0) {
             perror("Error on accept");
@@ -707,21 +710,24 @@ void server_mode(int portno) {
             continue;
         }
 
-        if (pthread_attr_init(&pthread_attr)) {
-            fprintf(stderr, "Creating initial thread attributes failed\n");
-            exit(1);
-        }
-
-        if (pthread_attr_setdetachstate(&pthread_attr, PTHREAD_CREATE_DETACHED)) {
-            fprintf(stderr, "Setting thread attributes failed\n");
-            exit(1);
-        }
-
-        result = pthread_create(&server_thread, &pthread_attr, processRequest, (void *)new_sockfd);
+        // Create a new thread to handle the client
+        int result = pthread_create(&server_thread, NULL, processRequest, (void *)new_sockfd);
         if (result != 0) {
             fprintf(stderr, "Thread creation failed\n");
             free(new_sockfd);
+            continue;
         }
+
+        // Detach the thread for automatic cleanup
+        pthread_detach(server_thread);
+
+        // Check if the server should shut down
+        pthread_rwlock_rdlock(&lock);
+        if (!isOnline) {
+            pthread_rwlock_unlock(&lock);
+            break;
+        }
+        pthread_rwlock_unlock(&lock);
     }
 
     close(socket_fd);
@@ -736,11 +742,17 @@ int main (int argc, char **argv) {
         interactive_mode();
     }
     if (argc == 2 && valid_port(argv[1])) {
+        isOnline = true;
         int port = atoi(argv[1]);
         server_mode(port);
     }
-    free_list(&rules);
-    free_list(&requests);
 
+    if(rules){
+        free_list(&rules);
+    }
+
+    if(requests){
+        free_list(&requests);
+    }
     return 0;
 }

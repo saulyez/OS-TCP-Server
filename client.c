@@ -172,7 +172,10 @@ int main(int argc, char *argv[]) {
     if (!response_msg) {
         fprintf(stderr, "ERROR: Failed to read response from server\n");
     }
-    printf("%s\n", response_msg);
+    if (strchr(response_msg, '\n') == 0){
+        strcat(response_msg, "\n");
+    }
+    printf("%s", response_msg);
     free(response_msg);
 
     close(sockfd); // Clean up the socket
