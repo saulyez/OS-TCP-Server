@@ -78,6 +78,7 @@ void add_request(struct node **head, char *request) {
     strcpy(new_node->ip, request);
     new_node->next = NULL;
 
+    pthread_rwlock_wrlock(&lock);
 
     // If the list is empty, make the new node the head
     if (*head == NULL) {
@@ -90,6 +91,8 @@ void add_request(struct node **head, char *request) {
         }
         temp->next = new_node;
     }
+    pthread_rwlock_unlock(&lock);
+
 }
 
 
@@ -436,11 +439,13 @@ void free_list(struct node **head) {
 
 void delete_rules(struct node **head, const char *ip, const char *port, int client_socket) {
     if (!check_valid_rules(ip, port)) {
-        print_send("Rule Invalid\n", client_socket);
+        print_send("Invalid Rule \n", client_socket);
         return;
     }
+    pthread_rwlock_wrlock(&lock);
     if (*head == NULL) {
         print_send("Rule not found\n", client_socket);
+        pthread_rwlock_unlock(&lock);
         return;
     }
 
@@ -470,7 +475,8 @@ void delete_rules(struct node **head, const char *ip, const char *port, int clie
         prev = temp;
         temp = temp->next;
     }
-    print_send("Rule not found", client_socket);
+    pthread_rwlock_unlock(&lock);
+    print_send("Rule not found\n", client_socket);
     return;
 }
 
@@ -481,7 +487,8 @@ void add_rule(struct node **head, char *new_ip, char *new_port, int client_socke
         return;
     }
     if (!check_valid_rules(new_ip, new_port)) {
-        print_send("Rule invalid\n", client_socket);
+        print_send("Invalid Rule\n", client_socket);
+        free(new_node);
         return;
     }
     // Copy the new rule into the node
@@ -489,6 +496,7 @@ void add_rule(struct node **head, char *new_ip, char *new_port, int client_socke
     strcpy(new_node->port, new_port);
     new_node->next = NULL;
 
+    pthread_rwlock_wrlock(&lock);
     // If the list is empty, make the new node the head
     if (*head == NULL) {
         *head = new_node;
@@ -500,6 +508,8 @@ void add_rule(struct node **head, char *new_ip, char *new_port, int client_socke
         }
         temp->next = new_node;
     }
+    pthread_rwlock_unlock(&lock);
+
     print_send("Rule added\n", client_socket);
 }
 void interactive_mode() {
@@ -517,7 +527,7 @@ void interactive_mode() {
             continue;
         }
         else if (args > 2) {
-            print_send("Invalid Request\n", -1);
+            print_send("Illegal request\n", -1);
         }
         else if (strcmp(command, "R") == 0) {
             // Print all the requests if "R" is entered
@@ -538,7 +548,7 @@ void interactive_mode() {
             //TODO Change Print rules and its connections
             print_rules(&rules, -1);
         } else {
-            print_send("Invalid Request\n", -1);
+            print_send("Illegal request\n", -1);
         }
     }
 }
@@ -618,7 +628,7 @@ void *processRequest(void *args) {
         pthread_exit(NULL);
     }
 
-    // Check for shutdown command
+    // Check for shutdown command use to check memory leaks
     if (request[0] == 'E' && strlen(request) == 1) {
         isOnline = false;
         free(request);
@@ -631,23 +641,20 @@ void *processRequest(void *args) {
     int argcount = sscanf(request, "%s %s %s %s", command, new_ip, new_port, extra);
     if (argcount > 3) {
         print_send("Illegal request\n", *newsockfd);
-    } else if (command[0] == 'L') {
+    } else if (command[0] == 'L' && strlen(command) == 1) {
         pthread_rwlock_rdlock(&lock);
         print_rules(&rules, *newsockfd);
         pthread_rwlock_unlock(&lock);
     } else if (command[0] == 'A' && strlen(command) == 1) {
-        pthread_rwlock_wrlock(&lock);
         add_rule(&rules, new_ip, new_port, *newsockfd);
-        pthread_rwlock_unlock(&lock);
-    } else if (command[0] == 'D') {
-        pthread_rwlock_wrlock(&lock);
+    } else if (command[0] == 'D' && strlen(command) == 1) {
         delete_rules(&rules, new_ip, new_port, *newsockfd);
         pthread_rwlock_unlock(&lock);
-    } else if (command[0] == 'C') {
-        pthread_rwlock_rdlock(&lock);
+    } else if (command[0] == 'C'&& strlen(command) == 1) {
+        pthread_rwlock_wrlock(&lock);
         check_in_rule(&rules, new_ip, new_port, *newsockfd);
         pthread_rwlock_unlock(&lock);
-    } else if (command[0] == 'R') {
+    } else if (command[0] == 'R' && strlen(command) == 1) {
         pthread_rwlock_rdlock(&lock);
         print_requests(&requests, *newsockfd);
         pthread_rwlock_unlock(&lock);
@@ -658,7 +665,6 @@ void *processRequest(void *args) {
     // Cleanup
     free(request);
     close(*newsockfd);
-    free(newsockfd);
     pthread_exit(NULL);
 }
 
@@ -666,12 +672,15 @@ void server_mode(int portno) {
     int socket_fd;
     struct sockaddr_in server_addr;
 
+
     // Create the socket
     socket_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_fd < 0) {
         perror("Error creating socket");
         exit(1);
     }
+    int opps = 1;
+    setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opps, sizeof(opps));
 
     bzero((char *)&server_addr, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
