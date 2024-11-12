@@ -437,11 +437,11 @@ void free_list(struct node **head) {
 
 void delete_rules(struct node **head, const char *ip, const char *port, int client_socket) {
     if (!check_valid_rules(ip, port)) {
-        print_send("Rule invalid", client_socket);
+        print_send("Rule Invalid\n", client_socket);
         return;
     }
     if (*head == NULL) {
-        print_send("Rule not found", client_socket);
+        print_send("Rule not found\n", client_socket);
         return;
     }
 
@@ -452,7 +452,7 @@ void delete_rules(struct node **head, const char *ip, const char *port, int clie
         *head = temp->next;
         delete_matched_connections(&temp);
         free(temp);
-        print_send("Rule deleted", client_socket);
+        print_send("Rule deleted\n", client_socket);
         temp = *head; // Move to the next node
         return;
     }
@@ -601,7 +601,7 @@ void *processRequest(void *args) {
     int *newsockfd = (int *)args;
     char *request;
     char new_ip[BUFFERSIZE], new_port[BUFFERSIZE];
-    char extra[2];
+    int n = 0;
     // Read the client's request
     request = readRes(*newsockfd);
     add_request(&requests, request);
@@ -611,43 +611,53 @@ void *processRequest(void *args) {
         free(newsockfd);
         pthread_exit(NULL);
     }
-    int argcount = sscanf(request + 2, "%s %s %s", new_ip, new_port, extra);
-    if (argcount >  2){
+
+    // if (strlen(request) < 2) {
+    //     print_send("Invalid request\n", *newsockfd);
+    //     free(request);
+    //     close(*newsockfd);
+    //     free(newsockfd);
+    //     pthread_exit(NULL);
+    // }
+    int argcount = sscanf(request + 2, "%32s %11s %n", new_ip, new_port, &n);
+    if(argcount > 2 || request[2 + n] != '\0'){
         print_send("Illegal request\n", *newsockfd);
         free(request);
         close(*newsockfd);
         free(newsockfd);
         pthread_exit(NULL);
     }
+
     // Process commands
-    if (strcmp(request, "L") == 0) {
+    if (request[0] == 'L') {
         pthread_rwlock_rdlock(&lock);
         print_rules(&rules, *newsockfd); // Send all rules to the client
         pthread_rwlock_unlock(&lock);
-    } else if (strncmp(request, "A ", 2) == 0) {
-        if (argcount == 2) {
-            pthread_rwlock_wrlock(&lock);
-            add_rule(&rules, new_ip, new_port, *newsockfd);
-            pthread_rwlock_unlock(&lock);
-            // writeResult(*newsockfd, "Rule added\n", strlen("Rule added\n") + 1);
-        }
-        // else {
-        //     writeResult(*newsockfd, "Invalid rule\n", strlen("Invalid rule\n") + 1);
-        // }
-    } else if(strncmp(request, "D ",2) == 0) {
-        pthread_rwlock_rdlock(&lock);
-        delete_rules(&rules, new_ip, new_port, *newsockfd );
+    } else if (request[0] == 'A' && request[1] == ' ') {
+        pthread_rwlock_wrlock(&lock);
+        add_rule(&rules, new_ip, new_port, *newsockfd);
+        pthread_rwlock_unlock(&lock);
+
+    } else if(request[0] == 'D' && request[1] == ' ') {
+        pthread_rwlock_wrlock(&lock);
+        delete_rules(&rules, new_ip, new_port, *newsockfd);
         pthread_rwlock_unlock(&lock);
         // writeResult(*newsockfd,);
-    } else if (strncmp(request, "C ",2) == 0){
+    } else if (request[0] == 'C' && request[1] == ' '){
         pthread_rwlock_rdlock(&lock);
         check_in_rule(&rules,new_ip,new_port, *newsockfd);
         pthread_rwlock_unlock(&lock);
-    }else if (strcmp(request, "R") == 0) {
+    }else if (request[0] == 'R') {
         pthread_rwlock_rdlock(&lock);
         print_requests(&requests, *newsockfd);
         pthread_rwlock_unlock(&lock);
+    } else if (request[0] == 'E') {
+        free(request);
+        close(*newsockfd);
+        free(newsockfd);
+        pthread_exit(NULL);
     }
+
     // Cleanup
     free(request);
     close(*newsockfd);
