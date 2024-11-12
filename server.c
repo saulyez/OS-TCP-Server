@@ -374,7 +374,7 @@ bool within_ip_range(const char *range, const char *ip) {
 
 void check_in_rule(struct node **head, char *ip, char *port, int client_socket) {
     if (!check_valid_rules(ip, port)) {
-        print_send("Illegal IP address or port specified", client_socket);
+        print_send("Illegal IP address or port specified\n", client_socket);
         return;
     }
 
@@ -401,14 +401,13 @@ void check_in_rule(struct node **head, char *ip, char *port, int client_socket) 
         // If both IP and Port match the criteria
         if (inIp && inPort) {
             add_matched_connection(current, ip, port);
-            print_send("Connection accepted", client_socket);
+            print_send("Connection accepted\n", client_socket);
             return;
-        } else {
-            print_send("Connection rejected", client_socket);
         }
 
         current = current->next;
     }
+    print_send("Connection rejected\n", client_socket);
 }
 
 void delete_matched_connections(struct node **connections_head) {
