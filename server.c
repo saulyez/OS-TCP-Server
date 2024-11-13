@@ -178,7 +178,8 @@ bool valid_ports(const char *port) {
 
 bool valid_ip(const char *ip) {
     char temp[BUFFERSIZE];
-    strncpy(temp, ip ,BUFFERSIZE);
+    strncpy(temp, ip, BUFFERSIZE);
+    temp[BUFFERSIZE - 1] = '\0'; // Ensure null termination
     char *split = strtok(temp, ".");
     int parts = 0;
 
@@ -186,6 +187,12 @@ bool valid_ip(const char *ip) {
         if (!only_digit(split)) {
             return false;
         }
+
+        // Check for leading zeros
+        if (split[0] == '0' && strlen(split) > 1) {
+            return false;
+        }
+
         long int num = strtol(split, NULL, 10);
         if (num < 0 || num > 255) {
             return false;
@@ -198,6 +205,7 @@ bool valid_ip(const char *ip) {
     }
     return true;
 }
+
 bool valid_ip_range (const char *ip_range) {
     // xxx.xxx.xxx.xxx-xxx.xxx.xxx.xxx
     // xxx.xxx.xxx.xxx and xxx.xxx.xxx.xxx
@@ -349,7 +357,7 @@ bool within_ip_range(const char *range, const char *ip) {
         split = strtok(NULL, ".");
     }
 
-    // Check if target_ip is within [left_ip, right_ip] including boundaries
+    // Check if target_ip is within [left_ip, right_ip]
     bool within_lower = true;
     bool within_upper = true;
 
@@ -439,7 +447,7 @@ void free_list(struct node **head) {
 
 void delete_rules(struct node **head, const char *ip, const char *port, int client_socket) {
     if (!check_valid_rules(ip, port)) {
-        print_send("Invalid Rule \n", client_socket);
+        print_send("Rule invalid\n", client_socket);
         return;
     }
     pthread_rwlock_wrlock(&lock);
@@ -634,10 +642,10 @@ void *processRequest(void *args) {
         free(request);
         free(rules);
         close(*newsockfd);
-        free(newsockfd);
+        free(args);
         pthread_exit(NULL);
     }
-
+    // A
     int argcount = sscanf(request, "%s %s %s %s", command, new_ip, new_port, extra);
     if (argcount > 3) {
         print_send("Illegal request\n", *newsockfd);
@@ -665,6 +673,7 @@ void *processRequest(void *args) {
     // Cleanup
     free(request);
     close(*newsockfd);
+    free(newsockfd);
     pthread_exit(NULL);
 }
 
@@ -700,9 +709,10 @@ void server_mode(int portno) {
         close(socket_fd);
         exit(1);
     }
+    int *new_sockfd;
     while (true) {
         pthread_t server_thread;
-        int *new_sockfd = malloc(sizeof(int));
+        new_sockfd = malloc(sizeof(int));
         if (!new_sockfd) {
             fprintf(stderr, "Error allocating memory for new socket.\n");
             continue;
@@ -738,7 +748,10 @@ void server_mode(int portno) {
         }
         pthread_rwlock_unlock(&lock);
     }
-
+    if(new_sockfd){
+        free(new_sockfd);
+        new_sockfd = NULL;
+    }
     close(socket_fd);
 }
 
