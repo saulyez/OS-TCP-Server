@@ -29,7 +29,7 @@ This project implements a server and client system to manage firewall configurat
 ./client <serverHost> <serverPort> <command>
 ## Fire Rule Format
 <IPAddresses> <ports>
-E.g: 147.188.193.0-147.188.194.255 21-22
+147.188.193.0-147.188.194.255 21-22
 ## Example Usage
 Start server at a port: ./server 2200
 Client sends a message : ./client localhost 2200 A 147.188.192.41 443
