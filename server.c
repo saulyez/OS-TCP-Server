@@ -681,13 +681,13 @@ void server_mode(int portno) {
     int socket_fd;
     struct sockaddr_in server_addr;
 
-
     // Create the socket
     socket_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_fd < 0) {
         perror("Error creating socket");
         exit(1);
     }
+
     int opps = 1;
     setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opps, sizeof(opps));
 
@@ -709,10 +709,10 @@ void server_mode(int portno) {
         close(socket_fd);
         exit(1);
     }
-    int *new_sockfd;
+
     while (true) {
         pthread_t server_thread;
-        new_sockfd = malloc(sizeof(int));
+        int *new_sockfd = malloc(sizeof(int));
         if (!new_sockfd) {
             fprintf(stderr, "Error allocating memory for new socket.\n");
             continue;
@@ -729,16 +729,16 @@ void server_mode(int portno) {
             continue;
         }
 
-        // Create a new thread to handle the client
-        int result = pthread_create(&server_thread, NULL, processRequest, (void *)new_sockfd);
-        if (result != 0) {
-            fprintf(stderr, "Thread creation failed\n");
+        // Pass the new socket to the thread
+        if (pthread_create(&server_thread, NULL, processRequest, (void *)new_sockfd) == 0) {
+            // Wait for the thread to complete
+            pthread_join(server_thread, NULL);
+        } else {
+            perror("Failed to create thread");
+            close(*new_sockfd);
             free(new_sockfd);
             continue;
         }
-
-        // Detach the thread for automatic cleanup
-        pthread_detach(server_thread);
 
         // Check if the server should shut down
         pthread_rwlock_rdlock(&lock);
@@ -748,10 +748,7 @@ void server_mode(int portno) {
         }
         pthread_rwlock_unlock(&lock);
     }
-    if(new_sockfd){
-        free(new_sockfd);
-        new_sockfd = NULL;
-    }
+
     close(socket_fd);
 }
 
