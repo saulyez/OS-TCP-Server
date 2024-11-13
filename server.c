@@ -12,10 +12,9 @@
 #include <netinet/in.h>
 
 #define BUFFERSIZE 256
-bool isOnline = false;
+volatile bool isOnline = false;
 pthread_rwlock_t lock = PTHREAD_RWLOCK_INITIALIZER;
 int global_port;
-
 struct node *rules = NULL;
 struct node *requests = NULL;
 struct node {
@@ -79,6 +78,7 @@ void add_request(struct node **head, char *request) {
     strcpy(new_node->ip, request);
     new_node->next = NULL;
 
+    pthread_rwlock_wrlock(&lock);
 
     // If the list is empty, make the new node the head
     if (*head == NULL) {
@@ -91,6 +91,8 @@ void add_request(struct node **head, char *request) {
         }
         temp->next = new_node;
     }
+    pthread_rwlock_unlock(&lock);
+
 }
 
 
@@ -176,7 +178,8 @@ bool valid_ports(const char *port) {
 
 bool valid_ip(const char *ip) {
     char temp[BUFFERSIZE];
-    strncpy(temp, ip ,BUFFERSIZE);
+    strncpy(temp, ip, BUFFERSIZE);
+    temp[BUFFERSIZE - 1] = '\0'; // Ensure null termination
     char *split = strtok(temp, ".");
     int parts = 0;
 
@@ -184,6 +187,12 @@ bool valid_ip(const char *ip) {
         if (!only_digit(split)) {
             return false;
         }
+
+        // Check for leading zeros
+        if (split[0] == '0' && strlen(split) > 1) {
+            return false;
+        }
+
         long int num = strtol(split, NULL, 10);
         if (num < 0 || num > 255) {
             return false;
@@ -196,6 +205,7 @@ bool valid_ip(const char *ip) {
     }
     return true;
 }
+
 bool valid_ip_range (const char *ip_range) {
     // xxx.xxx.xxx.xxx-xxx.xxx.xxx.xxx
     // xxx.xxx.xxx.xxx and xxx.xxx.xxx.xxx
@@ -347,7 +357,7 @@ bool within_ip_range(const char *range, const char *ip) {
         split = strtok(NULL, ".");
     }
 
-    // Check if target_ip is within [left_ip, right_ip] including boundaries
+    // Check if target_ip is within [left_ip, right_ip]
     bool within_lower = true;
     bool within_upper = true;
 
@@ -437,11 +447,13 @@ void free_list(struct node **head) {
 
 void delete_rules(struct node **head, const char *ip, const char *port, int client_socket) {
     if (!check_valid_rules(ip, port)) {
-        print_send("Rule invalid", client_socket);
+        print_send("Rule invalid\n", client_socket);
         return;
     }
+    pthread_rwlock_wrlock(&lock);
     if (*head == NULL) {
-        print_send("Rule not found", client_socket);
+        print_send("Rule not found\n", client_socket);
+        pthread_rwlock_unlock(&lock);
         return;
     }
 
@@ -452,7 +464,7 @@ void delete_rules(struct node **head, const char *ip, const char *port, int clie
         *head = temp->next;
         delete_matched_connections(&temp);
         free(temp);
-        print_send("Rule deleted", client_socket);
+        print_send("Rule deleted\n", client_socket);
         temp = *head; // Move to the next node
         return;
     }
@@ -471,7 +483,8 @@ void delete_rules(struct node **head, const char *ip, const char *port, int clie
         prev = temp;
         temp = temp->next;
     }
-    print_send("Rule not found", client_socket);
+    pthread_rwlock_unlock(&lock);
+    print_send("Rule not found\n", client_socket);
     return;
 }
 
@@ -482,7 +495,8 @@ void add_rule(struct node **head, char *new_ip, char *new_port, int client_socke
         return;
     }
     if (!check_valid_rules(new_ip, new_port)) {
-        print_send("Rule invalid\n", client_socket);
+        print_send("Invalid Rule\n", client_socket);
+        free(new_node);
         return;
     }
     // Copy the new rule into the node
@@ -490,6 +504,7 @@ void add_rule(struct node **head, char *new_ip, char *new_port, int client_socke
     strcpy(new_node->port, new_port);
     new_node->next = NULL;
 
+    pthread_rwlock_wrlock(&lock);
     // If the list is empty, make the new node the head
     if (*head == NULL) {
         *head = new_node;
@@ -501,6 +516,8 @@ void add_rule(struct node **head, char *new_ip, char *new_port, int client_socke
         }
         temp->next = new_node;
     }
+    pthread_rwlock_unlock(&lock);
+
     print_send("Rule added\n", client_socket);
 }
 void interactive_mode() {
@@ -513,12 +530,14 @@ void interactive_mode() {
         char new_port[BUFFERSIZE] = {0};
         char extra[BUFFERSIZE] = {0};
         int args = sscanf(command + 2, "%s %s %s", new_ip, new_port, extra);
-        if (args > 2) {
-            break;
-        }
         add_request(&requests, command);
-
-        if (strcmp(command, "R") == 0) {
+        if (strlen(command) <= 0){
+            continue;
+        }
+        else if (args > 2) {
+            print_send("Illegal request\n", -1);
+        }
+        else if (strcmp(command, "R") == 0) {
             // Print all the requests if "R" is entered
             print_requests(&requests, -1);
         } else if (command[0] == 'A' && command[1] == ' ') {
@@ -536,6 +555,8 @@ void interactive_mode() {
         } else if (strcmp(command, "L") == 0) {
             //TODO Change Print rules and its connections
             print_rules(&rules, -1);
+        } else {
+            print_send("Illegal request\n", -1);
         }
     }
 }
@@ -600,54 +621,55 @@ int writeResult(int sockfd, const char *buffer, size_t bufsize) {
 void *processRequest(void *args) {
     int *newsockfd = (int *)args;
     char *request;
-    char new_ip[BUFFERSIZE], new_port[BUFFERSIZE];
-    char extra[2];
+    char command[2] = {0};
+    char new_ip[33] = {0};
+    char new_port[14] = {0};
+    char extra[2] = {0};
+
     // Read the client's request
     request = readRes(*newsockfd);
     add_request(&requests, request);
     if (!request) {
-        fprintf(stderr, "ERROR reading from socket\n");
+        fprintf(stderr, "Error reading from socket.\n");
         close(*newsockfd);
         free(newsockfd);
         pthread_exit(NULL);
     }
-    int argcount = sscanf(request + 2, "%s %s %s", new_ip, new_port, extra);
-    if (argcount >  2){
-        print_send("Illegal request\n", *newsockfd);
+
+    // Check for shutdown command use to check memory leaks
+    if (request[0] == 'E' && strlen(request) == 1) {
+        isOnline = false;
         free(request);
+        free(rules);
         close(*newsockfd);
-        free(newsockfd);
+        free(args);
         pthread_exit(NULL);
     }
-    // Process commands
-    if (strcmp(request, "L") == 0) {
+    // A
+    int argcount = sscanf(request, "%s %s %s %s", command, new_ip, new_port, extra);
+    if (argcount > 3) {
+        print_send("Illegal request\n", *newsockfd);
+    } else if (command[0] == 'L' && strlen(command) == 1) {
         pthread_rwlock_rdlock(&lock);
-        print_rules(&rules, *newsockfd); // Send all rules to the client
+        print_rules(&rules, *newsockfd);
         pthread_rwlock_unlock(&lock);
-    } else if (strncmp(request, "A ", 2) == 0) {
-        if (argcount == 2) {
-            pthread_rwlock_wrlock(&lock);
-            add_rule(&rules, new_ip, new_port, *newsockfd);
-            pthread_rwlock_unlock(&lock);
-            // writeResult(*newsockfd, "Rule added\n", strlen("Rule added\n") + 1);
-        }
-        // else {
-        //     writeResult(*newsockfd, "Invalid rule\n", strlen("Invalid rule\n") + 1);
-        // }
-    } else if(strncmp(request, "D ",2) == 0) {
-        pthread_rwlock_rdlock(&lock);
-        delete_rules(&rules, new_ip, new_port, *newsockfd );
+    } else if (command[0] == 'A' && strlen(command) == 1) {
+        add_rule(&rules, new_ip, new_port, *newsockfd);
+    } else if (command[0] == 'D' && strlen(command) == 1) {
+        delete_rules(&rules, new_ip, new_port, *newsockfd);
         pthread_rwlock_unlock(&lock);
-        // writeResult(*newsockfd,);
-    } else if (strncmp(request, "C ",2) == 0){
-        pthread_rwlock_rdlock(&lock);
-        check_in_rule(&rules,new_ip,new_port, *newsockfd);
+    } else if (command[0] == 'C'&& strlen(command) == 1) {
+        pthread_rwlock_wrlock(&lock);
+        check_in_rule(&rules, new_ip, new_port, *newsockfd);
         pthread_rwlock_unlock(&lock);
-    }else if (strcmp(request, "R") == 0) {
+    } else if (command[0] == 'R' && strlen(command) == 1) {
         pthread_rwlock_rdlock(&lock);
         print_requests(&requests, *newsockfd);
         pthread_rwlock_unlock(&lock);
+    } else {
+        print_send("Illegal request\n", *newsockfd);
     }
+
     // Cleanup
     free(request);
     close(*newsockfd);
@@ -656,40 +678,50 @@ void *processRequest(void *args) {
 }
 
 void server_mode(int portno) {
-    int socket_fd, result;
+    int socket_fd;
     struct sockaddr_in server_addr;
 
+
+    // Create the socket
     socket_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_fd < 0) {
         perror("Error creating socket");
         exit(1);
     }
+    int opps = 1;
+    setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opps, sizeof(opps));
 
     bzero((char *)&server_addr, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(portno);
 
+    // Bind the socket
     if (bind(socket_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Error on binding");
+        close(socket_fd);
         exit(1);
     }
 
-    listen(socket_fd, 5);
-
-    while (1) {
+    // Start listening for incoming connections
+    if (listen(socket_fd, 5) < 0) {
+        perror("Error on listening");
+        close(socket_fd);
+        exit(1);
+    }
+    int *new_sockfd;
+    while (true) {
         pthread_t server_thread;
-        pthread_attr_t pthread_attr;
-        int *new_sockfd;
-        struct sockaddr_in client_addr;
-        socklen_t clilen = sizeof(client_addr);
-
         new_sockfd = malloc(sizeof(int));
         if (!new_sockfd) {
-            fprintf(stderr, "Error allocating memory\n");
+            fprintf(stderr, "Error allocating memory for new socket.\n");
             continue;
         }
 
+        struct sockaddr_in client_addr;
+        socklen_t clilen = sizeof(client_addr);
+
+        // Accept a new connection
         *new_sockfd = accept(socket_fd, (struct sockaddr *)&client_addr, &clilen);
         if (*new_sockfd < 0) {
             perror("Error on accept");
@@ -697,23 +729,29 @@ void server_mode(int portno) {
             continue;
         }
 
-        if (pthread_attr_init(&pthread_attr)) {
-            fprintf(stderr, "Creating initial thread attributes failed\n");
-            exit(1);
-        }
-
-        if (pthread_attr_setdetachstate(&pthread_attr, PTHREAD_CREATE_DETACHED)) {
-            fprintf(stderr, "Setting thread attributes failed\n");
-            exit(1);
-        }
-
-        result = pthread_create(&server_thread, &pthread_attr, processRequest, (void *)new_sockfd);
+        // Create a new thread to handle the client
+        int result = pthread_create(&server_thread, NULL, processRequest, (void *)new_sockfd);
         if (result != 0) {
             fprintf(stderr, "Thread creation failed\n");
             free(new_sockfd);
+            continue;
         }
-    }
 
+        // Detach the thread for automatic cleanup
+        pthread_detach(server_thread);
+
+        // Check if the server should shut down
+        pthread_rwlock_rdlock(&lock);
+        if (!isOnline) {
+            pthread_rwlock_unlock(&lock);
+            break;
+        }
+        pthread_rwlock_unlock(&lock);
+    }
+    if(new_sockfd){
+        free(new_sockfd);
+        new_sockfd = NULL;
+    }
     close(socket_fd);
 }
 
@@ -726,11 +764,17 @@ int main (int argc, char **argv) {
         interactive_mode();
     }
     if (argc == 2 && valid_port(argv[1])) {
+        isOnline = true;
         int port = atoi(argv[1]);
         server_mode(port);
     }
-    free_list(&rules);
-    free_list(&requests);
 
+    if(rules){
+        free_list(&rules);
+    }
+
+    if(requests){
+        free_list(&requests);
+    }
     return 0;
 }

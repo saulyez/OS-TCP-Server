@@ -63,38 +63,10 @@ char *response(int sockfd){
 
 }
 
-/* Function to read a message from the socket */
-char *readRes(int sockfd) {
-    size_t bufsize;
-    ssize_t res;
-
-    // Read the size of the incoming message
-    res = read(sockfd, &bufsize, sizeof(size_t));
-    if (res != sizeof(size_t)) {
-        error("ERROR: Reading message size from socket");
-    }
-
-    // Allocate memory for the message
-    char *buffer = malloc(bufsize + 1);
-    if (!buffer) {
-        error("ERROR: Memory allocation for buffer failed");
-    }
-
-    // Read the actual message
-    res = read(sockfd, buffer, bufsize);
-    if ((size_t)res != bufsize) {
-        free(buffer);
-        error("ERROR: Reading message content from socket");
-    }
-
-    buffer[bufsize] = '\0'; // Null-terminate the message
-    return buffer;
-}
-
 int main(int argc, char *argv[]) {
     int sockfd, res;
     struct addrinfo hints, *result, *rp;
-    char buffer[BUFFERLENGTH];
+    char buffer[BUFFERLENGTH] ={0};
 
     // Validate port number
     int port = atoi(argv[2]);
@@ -172,7 +144,10 @@ int main(int argc, char *argv[]) {
     if (!response_msg) {
         fprintf(stderr, "ERROR: Failed to read response from server\n");
     }
-    printf("%s\n", response_msg);
+    if (strchr(response_msg, '\n') == 0){
+        strcat(response_msg, "\n");
+    }
+    printf("%s", response_msg);
     free(response_msg);
 
     close(sockfd); // Clean up the socket
