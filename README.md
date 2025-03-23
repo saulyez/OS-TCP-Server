@@ -19,6 +19,7 @@ This project implements a server and client system to manage firewall configurat
 
 2. **Client**:
    - Send commands to the server and display responses.
+   - Usage: `./client <server_ip> <server_port> <message>`
 
 ## Commands
 ### Server
